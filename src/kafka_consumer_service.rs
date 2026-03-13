@@ -37,7 +37,6 @@ async fn send_notification(notification: Notification) -> bool {
 }
 
 // async fn push_notification_to_database(notification: Notification) {
-
 // }
 
 fn spawn_consumer_workers(consumer: StreamConsumer) {
@@ -130,7 +129,7 @@ fn client_incoming_connection_listener() {
     });
 }
 
-pub async fn routine(brokers: &str, topic_name: &str) {
+pub async fn start(brokers: &str, topic_name: &str) {
     let mut config: ClientConfig = ClientConfig::new();
 
     config
