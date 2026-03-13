@@ -6,4 +6,3 @@ pub struct Notification {
     pub receiver_id: Uuid,
     pub source_id: Uuid
 }
-
