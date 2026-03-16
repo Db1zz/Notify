@@ -91,8 +91,8 @@ async fn worker_routine(consumer_ptr: Arc<StreamConsumer>) {
                 }
             }
             Err(e) => {
-                // CONNECTED_CLIENTS.remove(&notification.receiver_id);
                 println!("Failed to send notification to a client {}", e);
+                CONNECTED_CLIENTS.remove(&notification.receiver_id);
             }
         }
     }
