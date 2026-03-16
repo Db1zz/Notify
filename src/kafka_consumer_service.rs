@@ -1,6 +1,6 @@
-use serde_json;
+use rdkafka::message::BorrowedMessage;
 use crate::types::Notification;
-use crate::error::DbError;
+use crate::error::{CassandraError, JsonError, KafkaError, NotifyError};
 use rdkafka::config::ClientConfig;
 use rdkafka::consumer::Consumer;
 use rdkafka::consumer::{StreamConsumer};
@@ -17,30 +17,16 @@ use scylla::client::session_builder::SessionBuilder;
 const MAX_WORKERS: usize = 10;
 static CONNECTED_CLIENTS:LazyLock<Arc<DashMap<Uuid, OwnedWriteHalf>>> = LazyLock::new(|| Arc::new(DashMap::<Uuid, OwnedWriteHalf>::new()));
 
-// fn load_hashed_dp() -> HashSet<Uuid> {
-//     return HashSet::new();
-// }
-
-// fn update_hashed_db() {
-
-// }
-
-// async fn monitor_db_updates() {
-// }
-
-async fn send_notification(notification: Notification) -> bool {
+async fn send_notification(notification: &Notification) -> Result<bool, std::io::Error> {
     if let Some(mut client) = CONNECTED_CLIENTS.get_mut(&notification.receiver_id) {
-        let _ = client.value_mut().write(notification.source_id.to_string().as_bytes()).await; // we can unwrap it...
-        return true;
+        client.value_mut().write(notification.source_id.to_string().as_bytes()).await?;
+        return Ok(true);
     }
 
-    return false;
+    return Ok(false);
 }
 
-// async fn push_notification_to_database(notification: Notification) {
-// }
-
-async fn is_notification_blocked_by_user(notification: &Notification) -> Result<bool, DbError> {
+async fn is_notification_blocked_by_user(notification: &Notification) -> Result<bool, CassandraError> {
     let session = SessionBuilder::new()
         .known_node("127.0.0.1:9042")
         .build()
@@ -62,52 +48,66 @@ async fn is_notification_blocked_by_user(notification: &Notification) -> Result<
     return Ok(false);
 }
 
+fn parse_notification(message: &BorrowedMessage) -> Result<Notification, NotifyError> {
+    let payload = message
+        .payload_view::<str>()
+        .ok_or(KafkaError::MissingPayload)?
+        .map_err(|e| KafkaError::Utf8(e))?;
+
+    let notification = serde_json::from_str::<Notification>(payload)
+        .map_err(|e| JsonError::Parser(e))?;
+
+    Ok(notification)
+}
+
+async fn worker_routine(consumer_ptr: Arc<StreamConsumer>) {
+    loop {
+        let notification_result = match consumer_ptr.recv().await {
+            Ok(m) => parse_notification(&m),
+            Err(e) => {
+                warn!("Kafka error: {}", e);
+                continue;
+            }
+        };
+
+        let notification = match notification_result {
+            Ok(n) => n,
+            Err(e) => {
+                println!("Error: {}", e);
+                continue;
+            }
+        };
+
+        if is_notification_blocked_by_user(&notification).await.unwrap() {
+            println!("Notification is blocked by user!");
+            continue;
+        }
+
+        match send_notification(&notification).await {
+            Ok(is_sent) => {
+                if !is_sent {
+                    println!("Notification has been pushed to a database\n");
+                    // push_notification_to_database(notification); TO DO...
+                }
+            }
+            Err(e) => {
+                // CONNECTED_CLIENTS.remove(&notification.receiver_id);
+                println!("Failed to send notification to a client {}", e);
+            }
+        }
+    }
+    
+}
+
 fn spawn_consumer_workers(consumer: StreamConsumer) {
     let consumer_ptr = Arc::new(consumer);
 
     for n in 0..MAX_WORKERS {
         println!("Worker {} has been started", n);
         let consumer_ptr_copy = consumer_ptr.clone();
+
         tokio::spawn(async move {
-            loop {
-                match consumer_ptr_copy.recv().await {
-                    Err(e) => warn!("Kafka error: {}", e),
-                    Ok(m) => {
-                        let payload = match m.payload_view::<str>() {
-                            None => "",
-                            Some(Ok(s)) => s,
-                            Some(Err(e)) => {
-                                warn!("Error while deserializing message payload: {:?}", e);
-                                ""
-                            }
-                        };
-
-                        if payload.is_empty() {
-                            println!("ZXC");
-                            continue;
-                        }
-
-                        match serde_json::from_str::<Notification>(payload) {
-                            Ok(notification) => {
-                                if is_notification_blocked_by_user(&notification).await.unwrap() {
-                                    println!("Notification is blocked by user!");
-                                    continue;
-                                }
-
-                                if !send_notification(notification).await {
-                                    println!("Notification has been pushed to a database\n");
-                                    // push_notification_to_database(notification); TO DO...
-                                }
-                            }
-                            Err(err) => {
-                                println!("Failed to parse json: {}", err);
-                            }
-                        }
-
-                        println!("Notification: {}", payload);
-                    }
-                }
-            }
+            worker_routine(consumer_ptr_copy).await;
         });
     }
 }
