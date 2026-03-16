@@ -1,7 +1,7 @@
-CREATE KEYSPACE IF NOT EXISTS myapp
+CREATE KEYSPACE IF NOT EXISTS notify
 WITH replication = {'class':'SimpleStrategy','replication_factor':1};
 
-USE myapp;
+USE notify;
 
 CREATE TABLE IF NOT EXISTS user_sources (
     userid UUID,

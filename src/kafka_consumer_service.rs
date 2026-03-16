@@ -1,6 +1,6 @@
 use serde_json;
-
 use crate::types::Notification;
+use crate::error::DbError;
 use rdkafka::config::ClientConfig;
 use rdkafka::consumer::Consumer;
 use rdkafka::consumer::{StreamConsumer};
@@ -12,6 +12,7 @@ use tokio::net::{TcpListener, tcp::OwnedWriteHalf};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
 use dashmap::DashMap;
+use scylla::client::session_builder::SessionBuilder;
 
 const MAX_WORKERS: usize = 10;
 static CONNECTED_CLIENTS:LazyLock<Arc<DashMap<Uuid, OwnedWriteHalf>>> = LazyLock::new(|| Arc::new(DashMap::<Uuid, OwnedWriteHalf>::new()));
@@ -38,6 +39,28 @@ async fn send_notification(notification: Notification) -> bool {
 
 // async fn push_notification_to_database(notification: Notification) {
 // }
+
+async fn is_notification_blocked_by_user(notification: &Notification) -> Result<bool, DbError> {
+    let session = SessionBuilder::new()
+        .known_node("127.0.0.1:9042")
+        .build()
+        .await?;
+
+    let query_rows = session
+        .query_unpaged(
+            "SELECT userid, sourceid, type FROM notify.user_sources WHERE userid = ? AND sourceid = ?",
+            (notification.receiver_id, notification.source_id),
+        )
+        .await?
+        .into_rows_result()?;
+
+    for row in query_rows.rows()? {
+        let (_userid, _sourceid, _typ): (Uuid, Uuid, String) = row?;
+        return Ok(true);
+    }
+
+    return Ok(false);
+}
 
 fn spawn_consumer_workers(consumer: StreamConsumer) {
     let consumer_ptr = Arc::new(consumer);
@@ -66,6 +89,11 @@ fn spawn_consumer_workers(consumer: StreamConsumer) {
 
                         match serde_json::from_str::<Notification>(payload) {
                             Ok(notification) => {
+                                if is_notification_blocked_by_user(&notification).await.unwrap() {
+                                    println!("Notification is blocked by user!");
+                                    continue;
+                                }
+
                                 if !send_notification(notification).await {
                                     println!("Notification has been pushed to a database\n");
                                     // push_notification_to_database(notification); TO DO...
