@@ -1,4 +1,5 @@
 use rdkafka::message::BorrowedMessage;
+use serde::de::value::Error;
 use crate::types::Notification;
 use crate::error::{CassandraError, JsonError, KafkaError, NotifyError};
 use rdkafka::config::ClientConfig;
@@ -34,7 +35,7 @@ async fn is_notification_blocked_by_user(notification: &Notification) -> Result<
 
     let query_rows = session
         .query_unpaged(
-            "SELECT userid, sourceid, type FROM notify.user_sources WHERE userid = ? AND sourceid = ?",
+            "SELECT userid, sourceid, type FROM notify.blocked_notifs WHERE userid = ? AND sourceid = ?",
             (notification.receiver_id, notification.source_id),
         )
         .await?
@@ -58,6 +59,28 @@ fn parse_notification(message: &BorrowedMessage) -> Result<Notification, NotifyE
         .map_err(|e| JsonError::Parser(e))?;
 
     Ok(notification)
+}
+
+fn destroy_client(client_id: &Uuid) {
+    let client = CONNECTED_CLIENTS.remove(&client_id);
+    if let Some(pair) = client {
+        pair.1.forget();
+    }
+}
+
+async fn push_notification_to_database(notification: &Notification) -> Result<(), CassandraError> {
+    let session = SessionBuilder::new()
+        .known_node("127.0.0.1:9042")
+        .build()
+        .await?;
+
+    session.query_unpaged(
+        "INSERT INTO notify.notifs_to_send (userid, sourceid) VALUES (?, ?)",
+        (notification.receiver_id, notification.source_id)
+    )
+    .await?;
+
+    Ok(())
 }
 
 async fn worker_routine(consumer_ptr: Arc<StreamConsumer>) {
@@ -87,16 +110,20 @@ async fn worker_routine(consumer_ptr: Arc<StreamConsumer>) {
             Ok(is_sent) => {
                 if !is_sent {
                     println!("Notification has been pushed to a database\n");
-                    // push_notification_to_database(notification); TO DO...
+                    match push_notification_to_database(&notification).await {
+                        Ok(ok) => {},
+                        Err(e) => {
+                            println!("ERROR! {}", e);
+                        }
+                    }
                 }
             }
             Err(e) => {
                 println!("Failed to send notification to a client {}", e);
-                CONNECTED_CLIENTS.remove(&notification.receiver_id);
+                destroy_client(&notification.receiver_id);
             }
         }
     }
-    
 }
 
 fn spawn_consumer_workers(consumer: StreamConsumer) {

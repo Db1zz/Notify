@@ -12,11 +12,10 @@ pub async fn start(producer_addr: &Arc<String>, brokers: &Arc<String>, topic_nam
         .expect("Producer creation error"));
 
 	let listener = TcpListener::bind(producer_addr.deref()).await.unwrap();
+	println!("Socket server started on {}", producer_addr);
 
     loop {
-		println!("Socket server started on {}", producer_addr);
         let (mut socket, client_addr) = listener.accept().await.unwrap();
-
 		println!("Client connected: {}", client_addr);
 		
 		let cloned_producer = producer.clone();
