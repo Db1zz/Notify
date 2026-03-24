@@ -1,7 +1,11 @@
-mod types;
-mod kafka_producer_service;
+pub mod models;
+pub mod error;
+pub mod repository;
+pub mod consumer;
+pub mod manager;
+
 mod kafka_consumer_service;
-mod error;
+mod kafka_producer_service;
 
 use std::sync::Arc;
 use clap::{Parser, Subcommand};

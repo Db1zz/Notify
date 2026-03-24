@@ -30,9 +30,6 @@ pub async fn start(producer_addr: &Arc<String>, brokers: &Arc<String>, topic_nam
 				}
 
 				let message = String::from_utf8_lossy(&buf[..n]).to_string();
-
-				// For tests: {"receiver_id":"27394ef9-af76-4b86-84d3-57796f4300d2", "source_id":"27394ef9-af76-4b86-84d3-57796f4300d2"}
-				// let message = "{\"receiver_id\":\"27394ef9-af76-4b86-84d3-57796f4300d2\", \"source_id\":\"27394ef9-af76-4b86-84d3-57796f4300d2\"}".to_owned();
 				let _ = cloned_producer
         			.send(
 						FutureRecord::to(cloned_topic_name.deref())
