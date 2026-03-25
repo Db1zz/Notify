@@ -1,5 +1,4 @@
 use std::sync::Arc;
-
 use tokio::io::AsyncWriteExt;
 
 use crate::models::notification::Notification;
@@ -13,7 +12,7 @@ load =
     (avg_latency_ms * 0.3) +
     (failed_rate * 0.2)
 */
-
+#[derive(Clone)]
 pub struct NotificationManager<NotifsToSendRepo, BlockedNotifsRepo, Consumer>
 where
 	NotifsToSendRepo: Repository<Item = Notification>,
@@ -43,7 +42,7 @@ where
 			repo_notifs_to_send,
 			repo_blocked_notifs,
 			consumer,
-			clients_manager
+			clients_manager,
 		}
 	}
 
