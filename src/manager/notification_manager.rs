@@ -2,10 +2,17 @@ use std::sync::Arc;
 
 use tokio::io::AsyncWriteExt;
 
-use crate::models::notification::{self, Notification};
+use crate::models::notification::Notification;
 use crate::consumer::notification_stream_consumer::NotificationStreamConsumer;
 use crate::repository::repository::{Repository, RepositoryError};
-use crate::manager::{ClientsManager};
+use crate::manager::ClientsManager;
+
+/*
+load = 
+    (queue_size * 0.5) +
+    (avg_latency_ms * 0.3) +
+    (failed_rate * 0.2)
+*/
 
 pub struct NotificationManager<NotifsToSendRepo, BlockedNotifsRepo, Consumer>
 where
@@ -32,7 +39,6 @@ where
 		consumer: Arc<Consumer>,
 		clients_manager: Arc<ClientsManager>
 	) -> Self {
-
 		Self {
 			repo_notifs_to_send,
 			repo_blocked_notifs,
@@ -46,13 +52,12 @@ where
 			Some(client) => {
 				// TODO: some error handling
 				let mut writer = client.lock().await;
-				writer.write_all(notification.sourceid.as_bytes());
+				writer.write_all(notification.sourceid.as_bytes()).await; // <- if failed
 				return true;
 			},
 			None => {
 				return false;
 			}
-
 		}
 	}
 
@@ -90,9 +95,4 @@ where
 			}
 		}
 	}
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum NotificationManagerError {
-
 }

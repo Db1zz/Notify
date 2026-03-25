@@ -18,7 +18,13 @@ impl ClientsManager {
 		}
 	}
 
-	async fn connect_client_task(connected_clients: Arc<DashMap<Uuid, Arc<Mutex<OwnedWriteHalf>>>>, mut reader: OwnedReadHalf, writer: OwnedWriteHalf) {
+	// TODO: should return an error... also write more descriptive error messages...
+	async fn connect_client_task(
+		connected_clients: Arc<DashMap<Uuid, Arc<Mutex<OwnedWriteHalf>>>>,
+		mut reader: OwnedReadHalf,
+		writer: OwnedWriteHalf
+	)
+	{
 		let mut buf = [0; 1024];
 
 		let rb = reader.read(&mut buf).await.unwrap();
@@ -35,7 +41,7 @@ impl ClientsManager {
 			Some(s) => s.to_string(),
 			None => {
 				println!("Error! Expected JSON \"user_id\":\"123\"");
-				return ;
+				return;
 			}
 		};
 
