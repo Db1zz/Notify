@@ -15,10 +15,12 @@
         4. The load balancer must receive information about node load
 */
 
+use std::sync::Mutex;
 use std::{sync::Arc, thread::sleep, time::Duration};
 use std::net::SocketAddr;
 use tokio::net::{TcpListener, tcp::{OwnedReadHalf, OwnedWriteHalf}};
-use crossbeam_deque::{Injector, Stealer, Worker};
+
+use crate::manager::task_manager::{TaskManager, TaskManagerTask};
 
 struct LoadBalancerTask {
 	client_addr: SocketAddr,
@@ -36,26 +38,30 @@ impl LoadBalancerTask {
 	}
 }
 
+impl TaskManagerTask for LoadBalancerTask
+{
+	fn handle(self) {
+
+	}
+}
+
 #[derive(Clone)]
 pub struct LoadBalancer {
-	consumers: Arc<Vec<String>>,
-	producers: Arc<Vec<String>>,
+	// consumers: Arc<Vec<String>>,
+	// producers: Arc<Vec<String>>,
 
 	listener: Arc<TcpListener>,
-
-    injector: Arc<Injector<LoadBalancerTask>>,
-    stealers: Arc<Vec<Stealer<LoadBalancerTask>>>,
+	task_manager: Arc<Mutex<TaskManager<LoadBalancerTask>>>,
 }
 
 impl LoadBalancer {
 	pub async fn new(addr: String) -> Self {
 		Self {
-			consumers: Arc::new(Vec::new()),
-			producers: Arc::new(Vec::new()),
+			// consumers: Arc::new(Vec::new()),
+			// producers: Arc::new(Vec::new()),
 			listener: Arc::new(TcpListener::bind(addr).await.unwrap()),
 
-			injector: Arc::new(Injector::new()),
-			stealers: Arc::new(Vec::new())
+			task_manager: Arc::new(Mutex::new(TaskManager::new(5))),
 		}
 	}
 
@@ -81,55 +87,13 @@ impl LoadBalancer {
 		});
 	}
 
-	fn handle_task(&self, task: LoadBalancerTask) {
-		//let nodes = self.get_least_loaded_nodes();
-		// write addresses to a client...
-		// close socket and safely finish task...
-	}
-
-	fn spawn_workers(&self) {
-		let amount_of_workers = 5;
-
-		let mut workers = Vec::new();
-		let mut stealers = Vec::new();
-	
-		for _ in 0..amount_of_workers {
-			let worker = Worker::<LoadBalancerTask>::new_fifo();
-			stealers.push(worker.stealer());
-			workers.push(worker);
-		}
-
-		for worker in workers {
-			let lb_clone = self.clone();
-			let stealers = self.stealers.clone();
-			let injector = self.injector.clone();
-
-			std::thread::spawn(move || {
-				loop {
-					if let Some(task) = worker.pop() {
-						lb_clone.handle_task(task);
-						continue;
-					}
-
-					if let Some(task) = injector.steal().success() {
-						lb_clone.handle_task(task);
-						continue;
-					}
-
-					for stealer in &*stealers {
-						if let Some(task) = stealer.steal().success() {
-							lb_clone.handle_task(task);
-							break;
-						}
-					}
-				}
-			});
-		}
-	}
 
 	pub async fn start(&self) {
+		{
+			self.task_manager.lock().unwrap().start(); // ewwwwwwww tbh mutex in our case is cringe ewwwwwwwww
+		}
+
 		self.start_load_updater();
-		self.spawn_workers();
 
 		loop {
 			// TODO: I think it should be handled if we exceed the maximum number of fds
@@ -137,7 +101,7 @@ impl LoadBalancer {
 			let (reader, writer) = socket.into_split();
 
 			let task = LoadBalancerTask::new(client_addr, reader, writer);
-			self.injector.push(task);
+			self.task_manager.lock().unwrap().submit(task); // fr cringe bro
 		}
 	}
 }
