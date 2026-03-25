@@ -1,15 +1,20 @@
-use std::sync::Arc;
+use std::{sync::{Arc, Mutex}, usize};
 
 use crossbeam_deque::{Injector, Stealer, Worker};
+use std::collections::VecDeque;
 
 pub struct TaskManager<Task, HandlerParams, HandlerResult> {
-	max_workers: i32,
+	max_workers: usize,
 
 	injector: Arc<Injector<Task>>,
-    stealers: Arc<Vec<Stealer<Task>>>,
+    stealers: Option<Arc<Vec<Stealer<Task>>>>,
 
 	handler: fn(HandlerParams, Task) -> HandlerResult,
 	handler_params: HandlerParams,
+
+	join_handles: Vec<std::thread::JoinHandle<()>>,
+	threads: Vec<std::thread::Thread>,
+	afk_threads: Arc<Mutex<VecDeque<std::thread::Thread>>>,
 }
 
 impl<Task, HandlerParams, HandlerResult> TaskManager<Task, HandlerParams, HandlerResult>
@@ -18,32 +23,36 @@ where
     HandlerParams: Clone + Copy + Send + 'static,
 	HandlerResult: 'static,
 {
-	pub fn new(max_workers: i32, handler: fn(HandlerParams, Task) -> HandlerResult, handler_params: HandlerParams) -> Self {
+	pub fn new(max_workers: usize, handler: fn(HandlerParams, Task) -> HandlerResult, handler_params: HandlerParams) -> Self {
 		Self {
 			max_workers,
 			injector: Arc::new(Injector::new()),
-			stealers: Arc::new(Vec::new()),
+			stealers: None,
 
 			handler,
 			handler_params,
+			join_handles: Vec::new(),
+			threads: Vec::new(),
+			afk_threads: Arc::new(Mutex::new(VecDeque::new())),
 		}
 	}
 
-	fn create_workers_and_stealers(&self) -> (Vec<Worker<Task>>, Vec<Stealer<Task>>) {
-		let mut workers = Vec::new();
-		let mut stealers = Vec::new();
+    fn create_workers_and_stealers(&self) -> (Vec<Worker<Task>>, Vec<Stealer<Task>>) {
+        let mut workers = Vec::with_capacity(self.max_workers);
+        let mut stealers = Vec::with_capacity(self.max_workers);
 
-		for _ in 0..self.max_workers {
-			let worker = Worker::<Task>::new_fifo();
-			stealers.push(worker.stealer());
-			workers.push(worker);
-		}
+        for _ in 0..self.max_workers {
+            let worker = Worker::new_fifo();
+            stealers.push(worker.stealer());
+            workers.push(worker);
+        }
 
-		(workers, stealers)
-	}
+        (workers, stealers)
+    }
 
-	fn spawn_workers(&self) {
-		let (mut workers, mut stealers) = self.create_workers_and_stealers();
+	fn spawn_workers(&mut self) {
+		let (workers, stealers) = self.create_workers_and_stealers();
+		self.stealers = Some(Arc::new(stealers));
 
 		for worker in workers {
 			let stealers = self.stealers.clone();
@@ -51,7 +60,9 @@ where
 
 			let handler_params = self.handler_params.clone();
 			let handler = self.handler.clone();
-			std::thread::spawn(move || {
+
+			let afk_threads = self.afk_threads.clone();
+			let join_handle = std::thread::spawn(move || {
 				loop {
 					if let Some(task) = worker.pop() {
 						(handler)(handler_params, task);
@@ -63,18 +74,37 @@ where
 						continue;
 					}
 
-					for stealer in &*stealers {
-						if let Some(task) = stealer.steal().success() {
-						(handler)(handler_params, task);
-							break;
+					if let Some(stealers) = &stealers {
+						for stealer in stealers.iter() {
+							if let Some(task) = stealer.steal().success() {
+							(handler)(handler_params, task);
+								break;
+							}
 						}
+						continue;
 					}
+
+					{
+						let mut queue = afk_threads.lock().unwrap();
+						queue.push_back(std::thread::current());
+					}
+					std::thread::park();
 				}
 			});
+
+			self.threads.push(join_handle.thread().clone());
+			self.join_handles.push(join_handle);
 		}
 	}
 
-	pub fn start(&self) {
+	pub fn start(&mut self) {
 		self.spawn_workers();
+	}
+
+	pub fn submit(&mut self, task: Task) {
+		if let Some(thread) = self.afk_threads.lock().unwrap().pop_front() {
+			thread.unpark();
+		}
+		self.injector.push(task);
 	}
 }
