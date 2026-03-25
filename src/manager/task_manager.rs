@@ -1,4 +1,4 @@
-use std::{sync::{Arc, Mutex}, usize};
+use std::{sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}}, usize};
 
 use crossbeam_deque::{Injector, Stealer, Worker};
 use std::collections::VecDeque;
@@ -15,6 +15,8 @@ pub struct TaskManager<Task, HandlerParams, HandlerResult> {
 	join_handles: Vec<std::thread::JoinHandle<()>>,
 	threads: Vec<std::thread::Thread>,
 	afk_threads: Arc<Mutex<VecDeque<std::thread::Thread>>>,
+
+	is_exiting: Arc<AtomicBool>,
 }
 
 impl<Task, HandlerParams, HandlerResult> TaskManager<Task, HandlerParams, HandlerResult>
@@ -34,6 +36,8 @@ where
 			join_handles: Vec::new(),
 			threads: Vec::new(),
 			afk_threads: Arc::new(Mutex::new(VecDeque::new())),
+
+			is_exiting: Arc::new(AtomicBool::new(false)),
 		}
 	}
 
@@ -62,6 +66,8 @@ where
 			let handler = self.handler.clone();
 
 			let afk_threads = self.afk_threads.clone();
+			let is_exiting = self.is_exiting.clone();
+
 			let join_handle = std::thread::spawn(move || {
 				loop {
 					if let Some(task) = worker.pop() {
@@ -82,6 +88,10 @@ where
 							}
 						}
 						continue;
+					}
+
+					if is_exiting.load(Ordering::Relaxed) {
+						break;
 					}
 
 					{
@@ -106,5 +116,24 @@ where
 			thread.unpark();
 		}
 		self.injector.push(task);
+	}
+}
+
+impl<Task, HandlerParams, HandlerResult> Drop
+	for TaskManager<Task, HandlerParams, HandlerResult> 
+{
+	fn drop(&mut self) {
+		self.is_exiting.store(true, Ordering::Relaxed);
+
+		{
+			let mut queue = self.afk_threads.lock().unwrap();
+			while let Some(thread) = queue.pop_front() {
+				thread.unpark();
+			}
+		}
+
+		for handle in self.join_handles.drain(..) {
+			let _ = handle.join();
+		}
 	}
 }
