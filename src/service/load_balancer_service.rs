@@ -15,7 +15,6 @@
         4. The load balancer must receive information about node load
 */
 
-use std::sync::Mutex;
 use std::{sync::Arc, thread::sleep, time::Duration};
 use std::net::SocketAddr;
 use tokio::net::{TcpListener, tcp::{OwnedReadHalf, OwnedWriteHalf}};
@@ -41,17 +40,16 @@ impl LoadBalancerTask {
 impl TaskManagerTask for LoadBalancerTask
 {
 	fn handle(self) {
-
+		println!("TODO LoadBalancerTask");
 	}
 }
 
-#[derive(Clone)]
 pub struct LoadBalancer {
 	// consumers: Arc<Vec<String>>,
 	// producers: Arc<Vec<String>>,
 
 	listener: Arc<TcpListener>,
-	task_manager: Arc<Mutex<TaskManager<LoadBalancerTask>>>,
+	task_manager: TaskManager<LoadBalancerTask>,
 }
 
 impl LoadBalancer {
@@ -61,47 +59,43 @@ impl LoadBalancer {
 			// producers: Arc::new(Vec::new()),
 			listener: Arc::new(TcpListener::bind(addr).await.unwrap()),
 
-			task_manager: Arc::new(Mutex::new(TaskManager::new(5))),
+			task_manager: TaskManager::new(5),
 		}
 	}
 
-	async fn update_load_status(&self) {
+	// async fn update_load_status(&self) {
 
-	}
+	// }
 
-	async fn get_least_loaded_nodes(&self) {
-		
-	}
+	// async fn get_least_loaded_nodes(&self) {
+	// }
 
 	// async fn handle_new_connection(&self) {
 
 	// }
 
 	fn start_load_updater(&self) {
-		let lb_clone = self.clone();
+		// let lb_clone = self.clone();
 		tokio::spawn(async move {
 			loop {
-				lb_clone.update_load_status().await;
+				// TODO
+				// lb_clone.update_load_status().await;
 				sleep(Duration::from_secs(1));
 			}
 		});
 	}
 
 
-	pub async fn start(&self) {
-		{
-			self.task_manager.lock().unwrap().start(); // ewwwwwwww tbh mutex in our case is cringe ewwwwwwwww
-		}
-
+	pub async fn start(&mut self) {
+		self.task_manager.start();
 		self.start_load_updater();
 
 		loop {
-			// TODO: I think it should be handled if we exceed the maximum number of fds
 			let (socket, client_addr) = self.listener.accept().await.unwrap(); 
 			let (reader, writer) = socket.into_split();
 
 			let task = LoadBalancerTask::new(client_addr, reader, writer);
-			self.task_manager.lock().unwrap().submit(task); // fr cringe bro
+			self.task_manager.submit(task);
 		}
 	}
 }
