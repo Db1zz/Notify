@@ -6,14 +6,14 @@ use tokio::{io::AsyncReadExt, net::{TcpListener, tcp::{OwnedReadHalf, OwnedWrite
 use uuid::Uuid;
 
 pub struct ClientsManager {
-	listener: TcpListener,
+	listener: Arc<TcpListener>,
 	connected_clients: Arc<DashMap<Uuid, Arc<Mutex<OwnedWriteHalf>>>>,
 }
 
 impl ClientsManager {
 	pub async fn new(addr: String) -> Self {
 		Self {
-			listener: TcpListener::bind(addr).await.unwrap(),
+			listener: Arc::new(TcpListener::bind(addr).await.unwrap()),
 			connected_clients: Arc::new(DashMap::new())
 		}
 	}
@@ -22,8 +22,7 @@ impl ClientsManager {
 	async fn connect_client_task(
 		connected_clients: Arc<DashMap<Uuid, Arc<Mutex<OwnedWriteHalf>>>>,
 		mut reader: OwnedReadHalf,
-		writer: OwnedWriteHalf
-	)
+		writer: OwnedWriteHalf)
 	{
 		let mut buf = [0; 1024];
 
@@ -37,7 +36,7 @@ impl ClientsManager {
 			}
 		};
 
-		let user_id: String = match json.get("user_id").and_then(|v| v.as_str()) {
+		let user_id: String = match json.get("userid").and_then(|v| v.as_str()) {
 			Some(s) => s.to_string(),
 			None => {
 				println!("Error! Expected JSON \"user_id\":\"123\"");
@@ -59,10 +58,10 @@ impl ClientsManager {
 	pub async fn listen(&self) {
 		loop {
 			let (socket, client_addr) = self.listener.accept().await.unwrap();
-			let (reader, writer) = socket.into_split();
-
 			let cloned_connected_clients = self.connected_clients.clone();
+
 			tokio::spawn(async move {
+				let (reader, writer) = socket.into_split();
 				Self::connect_client_task(cloned_connected_clients, reader, writer).await;
 				println!("A new client connected to the server {}", client_addr);
 			});

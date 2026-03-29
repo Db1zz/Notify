@@ -4,6 +4,7 @@ pub mod repository;
 pub mod consumer;
 pub mod manager;
 pub mod service;
+pub mod metrics;
 
 mod kafka_consumer_service;
 mod kafka_producer_service;

@@ -1,10 +1,14 @@
 use std::sync::Arc;
+use std::time::Instant;
+use async_trait::async_trait;
 use tokio::io::AsyncWriteExt;
 
+use crate::manager::task_manager::{TaskManager, TaskManagerTask};
 use crate::models::notification::Notification;
 use crate::consumer::notification_stream_consumer::NotificationStreamConsumer;
 use crate::repository::repository::{Repository, RepositoryError};
 use crate::manager::ClientsManager;
+use crate::metrics::LoadMetrics;
 
 /*
 load = 
@@ -12,37 +16,32 @@ load =
     (avg_latency_ms * 0.3) +
     (failed_rate * 0.2)
 */
-#[derive(Clone)]
-pub struct NotificationManager<NotifsToSendRepo, BlockedNotifsRepo, Consumer>
-where
-	NotifsToSendRepo: Repository<Item = Notification>,
-	BlockedNotifsRepo: Repository<Item = Notification>,
-	Consumer: NotificationStreamConsumer
-{
+pub struct NotificationManagerTask<NotifsToSendRepo, BlockedNotifsRepo> {
+	notification: Notification,
 	repo_notifs_to_send: Arc<NotifsToSendRepo>,
 	repo_blocked_notifs: Arc<BlockedNotifsRepo>,
-	consumer: Arc<Consumer>,
 	clients_manager: Arc<ClientsManager>,
+	metrics: Arc<LoadMetrics>
 }
 
-impl<NotifsToSendRepo, BlockedNotifsRepo, Consumer>
-    NotificationManager<NotifsToSendRepo, BlockedNotifsRepo, Consumer>
+impl<NotifsToSendRepo, BlockedNotifsRepo> NotificationManagerTask<NotifsToSendRepo, BlockedNotifsRepo> 
 where
-    NotifsToSendRepo: Repository<Item = Notification>,
-    BlockedNotifsRepo: Repository<Item = Notification>,
-    Consumer: NotificationStreamConsumer,
+	NotifsToSendRepo: Repository<Item = Notification> + 'static,
+	BlockedNotifsRepo: Repository<Item = Notification> + 'static,
 {
 	pub fn new(
+		notification: Notification,
 		repo_notifs_to_send: Arc<NotifsToSendRepo>,
 		repo_blocked_notifs: Arc<BlockedNotifsRepo>,
-		consumer: Arc<Consumer>,
-		clients_manager: Arc<ClientsManager>
-	) -> Self {
+		clients_manager: Arc<ClientsManager>,
+		metrics: Arc<LoadMetrics>) -> Self
+	{
 		Self {
+			notification,
 			repo_notifs_to_send,
 			repo_blocked_notifs,
-			consumer,
 			clients_manager,
+			metrics
 		}
 	}
 
@@ -59,9 +58,81 @@ where
 			}
 		}
 	}
+}
 
-	pub async fn start(&self) {
+#[async_trait]
+impl<NotifsToSendRepo, BlockedNotifsRepo> TaskManagerTask for NotificationManagerTask<NotifsToSendRepo, BlockedNotifsRepo>
+where
+	NotifsToSendRepo: Repository<Item = Notification> + 'static,
+	BlockedNotifsRepo: Repository<Item = Notification> + 'static,
+{
+	async fn handle(self) {
+		let started_at = Instant::now();
+		let is_notif_blocked: bool = match self.repo_blocked_notifs.get(&self.notification).await {
+			Ok(_) => true,
+			Err(RepositoryError::NotFound(_)) => false,
+			Err(e) => {
+				println!("DB Error: {:?}", e);
+				return;
+			}
+		};
+
+		if is_notif_blocked {
+			return;
+		}
+
+		let is_sent = self.send_notification(&self.notification).await;
+		if !is_sent {
+			println!("Failed to send notification to a client, pushing to the database");
+			let _ = self.repo_notifs_to_send.post(&self.notification).await;
+		}
+
+		self.metrics.record_latency(started_at.elapsed());
+		self.metrics.dec_queue();
+	}
+}
+
+pub struct NotificationManager<NotifsToSendRepo, BlockedNotifsRepo, Consumer>
+where
+	NotifsToSendRepo: Repository<Item = Notification> + 'static,
+	BlockedNotifsRepo: Repository<Item = Notification> + 'static,
+	Consumer: NotificationStreamConsumer
+{
+	repo_notifs_to_send: Arc<NotifsToSendRepo>,
+	repo_blocked_notifs: Arc<BlockedNotifsRepo>,
+	consumer: Arc<Consumer>,
+	clients_manager: Arc<ClientsManager>,
+	task_manager: TaskManager<NotificationManagerTask<NotifsToSendRepo, BlockedNotifsRepo>>,
+	metrics: Arc<LoadMetrics>,
+}
+
+impl<NotifsToSendRepo, BlockedNotifsRepo, Consumer>
+    NotificationManager<NotifsToSendRepo, BlockedNotifsRepo, Consumer>
+where
+    NotifsToSendRepo: Repository<Item = Notification> + 'static,
+    BlockedNotifsRepo: Repository<Item = Notification> + 'static,
+    Consumer: NotificationStreamConsumer,
+{
+	pub fn new(
+		repo_notifs_to_send: Arc<NotifsToSendRepo>,
+		repo_blocked_notifs: Arc<BlockedNotifsRepo>,
+		consumer: Arc<Consumer>,
+		clients_manager: Arc<ClientsManager>,
+		task_manager: TaskManager<NotificationManagerTask<NotifsToSendRepo, BlockedNotifsRepo>>,
+	) -> Self {
+		Self {
+			repo_notifs_to_send,
+			repo_blocked_notifs,
+			consumer,
+			clients_manager,
+			task_manager,
+			metrics: Arc::new(LoadMetrics::new())
+		}
+	}
+
+	pub async fn start(&mut self) {
 		let clients_manager_clone = self.clients_manager.clone();
+		self.task_manager.start();
 		tokio::spawn(async move {
 			clients_manager_clone.listen().await;
 		});
@@ -75,23 +146,15 @@ where
 				}
 			};
 
-			let is_notif_blocked: bool = match self.repo_blocked_notifs.get(&notification).await {
-				Ok(_) => true,
-				Err(RepositoryError::NotFound(_)) => false,
-				Err(e) => {
-					println!("DB Error: {:?}", e);
-					continue;
-				}
-			};
+			let task = NotificationManagerTask::new(notification,
+				self.repo_notifs_to_send.clone(),
+				self.repo_blocked_notifs.clone(),
+				self.clients_manager.clone(),
+				self.metrics.clone());
+			self.task_manager.submit(task).await;
+			self.metrics.inc_queue();
 
-			if is_notif_blocked {
-				continue;
-			}
-
-			let is_sent = self.send_notification(&notification).await;
-			if !is_sent {
-				let _ = self.repo_notifs_to_send.post(&notification).await;
-			}
+			println!("Avg load: {}", self.metrics.load());
 		}
 	}
 }

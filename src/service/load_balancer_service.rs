@@ -17,6 +17,7 @@
 
 use std::{sync::Arc, thread::sleep, time::Duration};
 use std::net::SocketAddr;
+use async_trait::async_trait;
 use tokio::net::{TcpListener, tcp::{OwnedReadHalf, OwnedWriteHalf}};
 
 use crate::manager::task_manager::{TaskManager, TaskManagerTask};
@@ -37,9 +38,10 @@ impl LoadBalancerTask {
 	}
 }
 
+#[async_trait]
 impl TaskManagerTask for LoadBalancerTask
 {
-	fn handle(self) {
+	async fn handle(self) {
 		println!("TODO LoadBalancerTask");
 	}
 }
@@ -85,7 +87,6 @@ impl LoadBalancer {
 		});
 	}
 
-
 	pub async fn start(&mut self) {
 		self.task_manager.start();
 		self.start_load_updater();
@@ -95,7 +96,7 @@ impl LoadBalancer {
 			let (reader, writer) = socket.into_split();
 
 			let task = LoadBalancerTask::new(client_addr, reader, writer);
-			self.task_manager.submit(task);
+			self.task_manager.submit(task).await;
 		}
 	}
 }

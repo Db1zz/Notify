@@ -8,6 +8,7 @@ use scylla::client::session_builder::SessionBuilder;
 use crate::consumer::KafkaNotificationStreamConsumer;
 use crate::manager::ClientsManager;
 use crate::manager::NotificationManager;
+use crate::manager::task_manager::TaskManager;
 use crate::repository::cassandra_repository::BlockedNotificationsCassandra;
 use crate::repository::cassandra_repository::NotificationsToSendCassandra;
 
@@ -44,7 +45,9 @@ pub async fn start(brokers: &str, topic_name: &str) {
 
     let clients_manager = Arc::new(ClientsManager::new("127.0.0.1:6969".to_owned()).await);
 
-    let notification_manager = NotificationManager::new(repo_notifs_to_send, repo_blocked_notifs, kafka_stream_consumer, clients_manager);
+    let task_manager = TaskManager::new(4);
+
+    let mut notification_manager = NotificationManager::new(repo_notifs_to_send, repo_blocked_notifs, kafka_stream_consumer, clients_manager, task_manager);
 
     notification_manager.start().await;
 
