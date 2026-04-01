@@ -46,7 +46,7 @@ where
 			Some(client) => {
 				// TODO: some error handling
 				let mut writer = client.lock().await;
-				writer.write_all(notification.sourceid.as_bytes()).await; // <- if failed
+				writer.write_all(notification.sourceid.as_bytes()).await;
 				return true;
 			},
 			None => {
@@ -100,6 +100,7 @@ where
 	clients_manager: Arc<ClientsManager>,
 	task_manager: TaskManager<NotificationServiceTask<NotifsToSendRepo, BlockedNotifsRepo>>,
 	metrics: Arc<LoadMetrics>,
+	receiver_addr: String
 }
 
 impl<NotifsToSendRepo, BlockedNotifsRepo, Consumer>
@@ -115,6 +116,7 @@ where
 		consumer: Arc<Consumer>,
 		clients_manager: Arc<ClientsManager>,
 		task_manager: TaskManager<NotificationServiceTask<NotifsToSendRepo, BlockedNotifsRepo>>,
+		receiver_addr: String
 	) -> Self {
 		Self {
 			repo_notifs_to_send,
@@ -122,7 +124,8 @@ where
 			consumer,
 			clients_manager,
 			task_manager,
-			metrics: Arc::new(LoadMetrics::new())
+			metrics: Arc::new(LoadMetrics::new()),
+			receiver_addr
 		}
 	}
 	
@@ -146,8 +149,8 @@ where
 		let metrics = self.metrics.clone();
 		let public_addr = self.clients_manager.get_addr().clone();
 
+		let receiver_addr = self.receiver_addr.clone();
 		tokio::spawn(async move {
-			let receiver_addr = "0.0.0.0:6979".to_owned();
 			loop {
 				let mut sender = Self::connect_and_register(
 						receiver_addr.clone(),

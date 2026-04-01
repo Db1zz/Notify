@@ -1,0 +1,16 @@
+consumer:
+  topic: "user-notifs"
+  brokers: "localhost:9092"
+  notifications_to_send_database_addr: "127.0.0.1:9042"
+  blocked_notifications_database_addr: "127.0.0.1:9042"
+  clients_node_addr: "127.0.0.1:6969"
+  metrics_receiver_addr: "0.0.0.0:6979"
+
+load_balancer:
+  load_balancer_addr: "0.0.0.0:8989"
+  load_balancer_metrics_addr: "0.0.0.0:6979"
+
+producer:
+  producer_addr: "localhost:9092"
+  topic: "user-notifs"
+  brokers: "localhost:9092"

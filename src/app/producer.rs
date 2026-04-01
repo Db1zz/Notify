@@ -1,25 +1,28 @@
-use std::{ops::Deref, time::Duration};
+use std::time::Duration;
 use rdkafka::{ClientConfig, producer::{FutureProducer, FutureRecord}};
 
 use tokio::{io::AsyncReadExt, net::TcpListener};
 use std::sync::Arc;
 
-pub async fn start(producer_addr: &Arc<String>, brokers: &Arc<String>, topic_name: &Arc<String>) {
+use crate::config::ProducerConfig;
+
+// TODO redesign this shit bro wtf lmao
+pub async fn start(config: ProducerConfig) {
     let producer: Arc<FutureProducer> = Arc::new(ClientConfig::new()
-        .set("bootstrap.servers", brokers.deref())
+        .set("bootstrap.servers", config.brokers)
         .set("message.timeout.ms", "5000")
         .create()
         .expect("Producer creation error"));
 
-	let listener = TcpListener::bind(producer_addr.deref()).await.unwrap();
-	println!("Socket server started on {}", producer_addr);
+	let listener = TcpListener::bind(config.producer_addr.clone()).await.unwrap();
+	println!("Socket server started on {}", config.producer_addr);
 
     loop {
         let (mut socket, client_addr) = listener.accept().await.unwrap();
 		println!("Client connected: {}", client_addr);
 		
-		let cloned_producer = producer.clone();
-		let cloned_topic_name = topic_name.clone();
+		let producer = producer.clone();
+		let topic = config.topic.clone();
 		tokio::spawn(async move {
 			loop {
 				let mut buf = [0; 1024];
@@ -30,9 +33,9 @@ pub async fn start(producer_addr: &Arc<String>, brokers: &Arc<String>, topic_nam
 				}
 
 				let message = String::from_utf8_lossy(&buf[..n]).to_string();
-				let _ = cloned_producer
+				let _ = producer
         			.send(
-						FutureRecord::to(cloned_topic_name.deref())
+						FutureRecord::to(&topic)
 							.payload(message.as_bytes())
 							.key(""),
 						Duration::from_secs(5)

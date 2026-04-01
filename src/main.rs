@@ -5,10 +5,15 @@ pub mod consumer;
 pub mod manager;
 pub mod service;
 pub mod metrics;
+pub mod config;
+
 mod app;
 
-use std::sync::Arc;
+use core::panic;
+use std::fs;
+
 use clap::{Parser, Subcommand};
+use crate::config::parser;
 
 #[derive(Parser)]
 #[command(name = "Notify", about = "Notification Service for Kafka")]
@@ -24,29 +29,51 @@ enum Service {
     LoadBalancer
 }
 
+fn get_config_string(path: Option<String>) -> String {
+    let config_path = match path {
+        Some(path) => path,
+        None => "./config.yaml".to_owned()
+    };
+
+    let config_raw_data = match fs::read_to_string(config_path.clone()) {
+        Ok(data) => data,
+        Err(e) => {
+            panic!("Error: Unable to read '{}' file\nReason: {}", config_path, e);
+        }
+    };
+
+    config_raw_data
+}
+
 #[tokio::main]
 async fn main() {
+    // Get config path from a CLI or use default path...
+    let config_raw_data = get_config_string(None);
+    let result = parser::parse(config_raw_data);
+    let config = match result {
+        Ok(c) => c,
+        Err(e) => {
+            panic!("Failed to parse config {}", e);
+        }
+    };
+
     let cli = Cli::parse();
-
-    let topic = Arc::<String>::new("user-notifs".to_string());
-    let brokers = Arc::<String>::new("localhost:9092".to_string());
-
-    let producer_addr = Arc::<String>::new("localhost:9069".to_string());
-
-    let lb_addr = "0.0.0.0:8989".to_owned();
-    let lb_metrics_addr = "0.0.0.0:6979".to_owned();
 
     match cli.command {
         Service::Consumer => {
-            app::consumer::start(&brokers, &topic).await;
+            app::consumer::start(config.consumer).await;
         }
 
         Service::Producer => {
-            app::producer::start(&producer_addr, &brokers, &topic).await;
+            app::producer::start(config.producer).await;
         }
 
         Service::LoadBalancer => {
-            app::load_balancer::start(lb_addr, lb_metrics_addr).await;
+            app::load_balancer::start(config.load_balancer).await;
+        }
+
+        _ => {
+            panic!("Error: Invalid Service or/and config");
         }
     }
 }
