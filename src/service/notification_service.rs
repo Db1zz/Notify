@@ -1,22 +1,18 @@
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use tokio::io::AsyncWriteExt;
+use tokio::time::sleep;
 
 use crate::manager::task_manager::{TaskManager, TaskManagerTask};
+use crate::metrics::metrics_sender::MetricsSender;
 use crate::models::notification::Notification;
 use crate::consumer::notification_stream_consumer::NotificationStreamConsumer;
 use crate::repository::repository::{Repository, RepositoryError};
 use crate::manager::ClientsManager;
-use crate::metrics::LoadMetrics;
+use crate::metrics::{LoadMetrics, Message, Metrics, NodeRole, Register};
 
-/*
-load = 
-    (queue_size * 0.5) +
-    (avg_latency_ms * 0.3) +
-    (failed_rate * 0.2)
-*/
-pub struct NotificationManagerTask<NotifsToSendRepo, BlockedNotifsRepo> {
+pub struct NotificationServiceTask<NotifsToSendRepo, BlockedNotifsRepo> {
 	notification: Notification,
 	repo_notifs_to_send: Arc<NotifsToSendRepo>,
 	repo_blocked_notifs: Arc<BlockedNotifsRepo>,
@@ -24,7 +20,7 @@ pub struct NotificationManagerTask<NotifsToSendRepo, BlockedNotifsRepo> {
 	metrics: Arc<LoadMetrics>
 }
 
-impl<NotifsToSendRepo, BlockedNotifsRepo> NotificationManagerTask<NotifsToSendRepo, BlockedNotifsRepo> 
+impl<NotifsToSendRepo, BlockedNotifsRepo> NotificationServiceTask<NotifsToSendRepo, BlockedNotifsRepo> 
 where
 	NotifsToSendRepo: Repository<Item = Notification> + 'static,
 	BlockedNotifsRepo: Repository<Item = Notification> + 'static,
@@ -61,12 +57,12 @@ where
 }
 
 #[async_trait]
-impl<NotifsToSendRepo, BlockedNotifsRepo> TaskManagerTask for NotificationManagerTask<NotifsToSendRepo, BlockedNotifsRepo>
+impl<NotifsToSendRepo, BlockedNotifsRepo> TaskManagerTask for NotificationServiceTask<NotifsToSendRepo, BlockedNotifsRepo>
 where
 	NotifsToSendRepo: Repository<Item = Notification> + 'static,
 	BlockedNotifsRepo: Repository<Item = Notification> + 'static,
 {
-	async fn handle(self) {
+	async fn handle(&self) {
 		let started_at = Instant::now();
 		let is_notif_blocked: bool = match self.repo_blocked_notifs.get(&self.notification).await {
 			Ok(_) => true,
@@ -92,7 +88,7 @@ where
 	}
 }
 
-pub struct NotificationManager<NotifsToSendRepo, BlockedNotifsRepo, Consumer>
+pub struct NotificationService<NotifsToSendRepo, BlockedNotifsRepo, Consumer>
 where
 	NotifsToSendRepo: Repository<Item = Notification> + 'static,
 	BlockedNotifsRepo: Repository<Item = Notification> + 'static,
@@ -102,12 +98,12 @@ where
 	repo_blocked_notifs: Arc<BlockedNotifsRepo>,
 	consumer: Arc<Consumer>,
 	clients_manager: Arc<ClientsManager>,
-	task_manager: TaskManager<NotificationManagerTask<NotifsToSendRepo, BlockedNotifsRepo>>,
+	task_manager: TaskManager<NotificationServiceTask<NotifsToSendRepo, BlockedNotifsRepo>>,
 	metrics: Arc<LoadMetrics>,
 }
 
 impl<NotifsToSendRepo, BlockedNotifsRepo, Consumer>
-    NotificationManager<NotifsToSendRepo, BlockedNotifsRepo, Consumer>
+    NotificationService<NotifsToSendRepo, BlockedNotifsRepo, Consumer>
 where
     NotifsToSendRepo: Repository<Item = Notification> + 'static,
     BlockedNotifsRepo: Repository<Item = Notification> + 'static,
@@ -118,7 +114,7 @@ where
 		repo_blocked_notifs: Arc<BlockedNotifsRepo>,
 		consumer: Arc<Consumer>,
 		clients_manager: Arc<ClientsManager>,
-		task_manager: TaskManager<NotificationManagerTask<NotifsToSendRepo, BlockedNotifsRepo>>,
+		task_manager: TaskManager<NotificationServiceTask<NotifsToSendRepo, BlockedNotifsRepo>>,
 	) -> Self {
 		Self {
 			repo_notifs_to_send,
@@ -129,14 +125,53 @@ where
 			metrics: Arc::new(LoadMetrics::new())
 		}
 	}
+	
+	async fn connect_and_register(receiver_addr: String, public_addr: String) -> MetricsSender {
+		let mut sender = MetricsSender::new(receiver_addr.clone());
 
-	pub async fn start(&mut self) {
-		let clients_manager_clone = self.clients_manager.clone();
-		self.task_manager.start();
+		let register = Register {
+			public_addr: public_addr.clone(),
+			role: NodeRole::NotificationService
+		};
+
+		while let Err(e) = sender.register(register.clone()).await {
+			eprintln!("Error: Failed to register the metrics sender {} with receiver {}\nInfo: {:?}", public_addr, receiver_addr, e);
+			sleep(Duration::from_secs(2)).await;
+		}
+
+		sender
+	}
+
+	async fn spawn_metrics_reporter(&self) {
+		let metrics = self.metrics.clone();
+		let public_addr = self.clients_manager.get_addr().clone();
+
 		tokio::spawn(async move {
-			clients_manager_clone.listen().await;
-		});
+			let receiver_addr = "0.0.0.0:6979".to_owned();
+			loop {
+				let mut sender = Self::connect_and_register(
+						receiver_addr.clone(),
+						public_addr.clone())
+					.await;
+				loop {
+					let metrics = Metrics {
+						public_addr: public_addr.clone(),
+						load: metrics.load()
+					};
+	
+					let result = sender.send(Message::Metrics(metrics)).await;
+					if let Err(e) = result {
+						eprintln!("Error: Failed to send metrics to the receiver {}\nInfo: {:?}", receiver_addr, e);
+						break;
+					}
 
+					sleep(Duration::from_secs(5)).await;
+				}
+			}
+		});
+	}
+
+	async fn run_notification_consumer(&mut self) {
 		loop {
 			let notification = match self.consumer.recv().await {
 				Ok(notification) => notification,
@@ -146,15 +181,25 @@ where
 				}
 			};
 
-			let task = NotificationManagerTask::new(notification,
+			let task = NotificationServiceTask::new(notification,
 				self.repo_notifs_to_send.clone(),
 				self.repo_blocked_notifs.clone(),
 				self.clients_manager.clone(),
 				self.metrics.clone());
 			self.task_manager.submit(task).await;
 			self.metrics.inc_queue();
-
-			println!("Avg load: {}", self.metrics.load());
 		}
+	}
+
+	pub async fn start(&mut self) {
+		let clients_manager_clone = self.clients_manager.clone();
+		self.task_manager.start();
+
+		tokio::spawn(async move {
+			clients_manager_clone.listen().await;
+		});
+
+		self.spawn_metrics_reporter().await;
+		self.run_notification_consumer().await;
 	}
 }

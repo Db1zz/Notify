@@ -8,13 +8,15 @@ use uuid::Uuid;
 pub struct ClientsManager {
 	listener: Arc<TcpListener>,
 	connected_clients: Arc<DashMap<Uuid, Arc<Mutex<OwnedWriteHalf>>>>,
+	addr: String,
 }
 
 impl ClientsManager {
 	pub async fn new(addr: String) -> Self {
 		Self {
-			listener: Arc::new(TcpListener::bind(addr).await.unwrap()),
-			connected_clients: Arc::new(DashMap::new())
+			listener: Arc::new(TcpListener::bind(addr.clone()).await.unwrap()),
+			connected_clients: Arc::new(DashMap::new()),
+			addr: addr
 		}
 	}
 
@@ -76,5 +78,9 @@ impl ClientsManager {
 
 	pub fn destroy_client(&self, client_id: Uuid) {
 		self.connected_clients.remove(&client_id);
+	}
+
+	pub fn get_addr(&self) -> &String {
+		return &self.addr;
 	}
 }

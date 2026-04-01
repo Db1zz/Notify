@@ -70,7 +70,9 @@ where
 	}
 
 	pub async fn submit(&mut self, task: Task) {
-		self.sender.send(task).await; // Not handling error rn
+		if let Err(e) = self.sender.send(task).await {
+			panic!("{:?}", e); // I'm not sure, if panic is the best choice here.
+		}
 	}
 }
 
@@ -88,5 +90,5 @@ where
 
 #[async_trait]
 pub trait TaskManagerTask {
-	async fn handle(self);
+	async fn handle(&self);
 }

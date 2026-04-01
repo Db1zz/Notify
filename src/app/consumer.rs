@@ -7,10 +7,10 @@ use scylla::client::session_builder::SessionBuilder;
 
 use crate::consumer::KafkaNotificationStreamConsumer;
 use crate::manager::ClientsManager;
-use crate::manager::NotificationManager;
 use crate::manager::task_manager::TaskManager;
 use crate::repository::cassandra_repository::BlockedNotificationsCassandra;
 use crate::repository::cassandra_repository::NotificationsToSendCassandra;
+use crate::service::NotificationService;
 
 pub async fn start(brokers: &str, topic_name: &str) {
     let mut config: ClientConfig = ClientConfig::new();
@@ -33,12 +33,14 @@ pub async fn start(brokers: &str, topic_name: &str) {
         .known_node("127.0.0.1:9042")
         .build()
         .await.unwrap();
+
     let repo_notifs_to_send = Arc::new(NotificationsToSendCassandra::new(repo_notifs_to_send_session));
 
     let repo_blocked_notifs_session = SessionBuilder::new()
         .known_node("127.0.0.1:9042")
         .build()
         .await.unwrap();
+
     let repo_blocked_notifs = Arc::new(BlockedNotificationsCassandra::new(repo_blocked_notifs_session));
 
     let kafka_stream_consumer = Arc::new(KafkaNotificationStreamConsumer::new(consumer));
@@ -47,9 +49,14 @@ pub async fn start(brokers: &str, topic_name: &str) {
 
     let task_manager = TaskManager::new(4);
 
-    let mut notification_manager = NotificationManager::new(repo_notifs_to_send, repo_blocked_notifs, kafka_stream_consumer, clients_manager, task_manager);
+    let mut notification_service = NotificationService::new(
+        repo_notifs_to_send,
+        repo_blocked_notifs,
+        kafka_stream_consumer,
+        clients_manager,
+        task_manager);
 
-    notification_manager.start().await;
+    notification_service.start().await;
 
     tokio::signal::ctrl_c().await
         .expect("Failed to listen ctrl + c");

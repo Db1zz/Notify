@@ -5,9 +5,7 @@ pub mod consumer;
 pub mod manager;
 pub mod service;
 pub mod metrics;
-
-mod kafka_consumer_service;
-mod kafka_producer_service;
+mod app;
 
 use std::sync::Arc;
 use clap::{Parser, Subcommand};
@@ -23,7 +21,7 @@ struct Cli {
 enum Service {
     Producer,
     Consumer,
-    // LoadBalancer
+    LoadBalancer
 }
 
 #[tokio::main]
@@ -35,13 +33,20 @@ async fn main() {
 
     let producer_addr = Arc::<String>::new("localhost:9069".to_string());
 
+    let lb_addr = "0.0.0.0:8989".to_owned();
+    let lb_metrics_addr = "0.0.0.0:6979".to_owned();
+
     match cli.command {
         Service::Consumer => {
-            kafka_consumer_service::start(&brokers, &topic).await;
+            app::consumer::start(&brokers, &topic).await;
         }
 
         Service::Producer => {
-            kafka_producer_service::start(&producer_addr, &brokers, &topic).await;
+            app::producer::start(&producer_addr, &brokers, &topic).await;
+        }
+
+        Service::LoadBalancer => {
+            app::load_balancer::start(lb_addr, lb_metrics_addr).await;
         }
     }
 }
