@@ -71,9 +71,5 @@ async fn main() {
         Service::LoadBalancer => {
             app::load_balancer::start(config.load_balancer).await;
         }
-
-        _ => {
-            panic!("Error: Invalid Service or/and config");
-        }
     }
 }
