@@ -4,8 +4,6 @@ use std::{
 use serial_test::serial;
 
 use Notify::{app::consumer, config::ConsumerConfig};
-
-use once_cell::sync::OnceCell;
 use tokio::task::JoinHandle;
 
 static DOCKER_COMPOSE: OnceCell<()> = OnceCell::new();
