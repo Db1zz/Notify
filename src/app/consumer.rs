@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use rdkafka::ClientConfig;
 use rdkafka::consumer::{Consumer, StreamConsumer};
-use rdkafka::util::Timeout;
 use scylla::client::session_builder::SessionBuilder;
 
 use crate::config::ConsumerConfig;
