@@ -1,5 +1,4 @@
 # TODO List
-* Config file
 * Tests
 
 ## The idea:
