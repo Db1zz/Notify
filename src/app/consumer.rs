@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use rdkafka::ClientConfig;
-use rdkafka::consumer::Consumer;
-use rdkafka::consumer::StreamConsumer;
+use rdkafka::consumer::{Consumer, StreamConsumer};
+use rdkafka::util::Timeout;
 use scylla::client::session_builder::SessionBuilder;
 
 use crate::config::ConsumerConfig;
@@ -29,6 +29,9 @@ pub async fn start(config: ConsumerConfig) {
     consumer
         .subscribe(&[&config.topic])
         .expect("Can't subscribe to specified topics");
+
+    consumer.fetch_metadata(Some(&config.topic), std::time::Duration::from_secs(3))
+        .expect("failed to fetch kafka metadata");
 
     let repo_notifs_to_send_session = SessionBuilder::new()
         .known_node(config.notifications_to_send_database_addr)

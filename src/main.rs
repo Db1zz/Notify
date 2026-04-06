@@ -61,15 +61,15 @@ async fn main() {
 
     match cli.command {
         Service::Consumer => {
-            app::consumer::start(config.consumer).await;
+            app::consumer::start(config.consumer.unwrap()).await;
         }
 
         Service::Producer => {
-            app::producer::start(config.producer).await;
+            app::producer::start(config.producer.unwrap()).await;
         }
 
         Service::LoadBalancer => {
-            app::load_balancer::start(config.load_balancer).await;
+            app::load_balancer::start(config.load_balancer.unwrap()).await;
         }
     }
 }

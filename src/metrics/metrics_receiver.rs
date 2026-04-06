@@ -44,17 +44,17 @@ impl MetricsReceiver {
 				Ok(Ok(_)) => {
 					match serde_json::from_str::<Message>(&line) {
 						Ok(msg) => {
-							if !client_public_addr.is_empty() {
-								let _ = tx.send(msg).await;
-								continue;
+							if client_public_addr.is_empty() {
+								if let Message::Register(data) = &msg {
+									client_public_addr = data.public_addr.clone();
+								} else {
+									eprintln!("Client should register first...");
+									return;
+								}
 							}
 
-							if let Message::Register(data) = &msg {
-								client_public_addr = data.public_addr.clone();
-							} else {
-								eprintln!("Client should register first...");
-								return;
-							}
+							let _ = tx.send(msg).await;
+							continue;
 						}
 						Err(e) => {
 							eprintln!("bad json from {}: {:?}", client_addr, e);

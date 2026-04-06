@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
-    pub consumer: ConsumerConfig,
-    pub load_balancer: LoadBalancerConfig,
-    pub producer: ProducerConfig,
+    pub consumer: Option<ConsumerConfig>,
+    pub load_balancer: Option<LoadBalancerConfig>,
+    pub producer: Option<ProducerConfig>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

@@ -156,6 +156,9 @@ where
 						receiver_addr.clone(),
 						public_addr.clone())
 					.await;
+
+				println!("Connected to the metrics receiver {}", receiver_addr);
+
 				loop {
 					let metrics = Metrics {
 						public_addr: public_addr.clone(),
