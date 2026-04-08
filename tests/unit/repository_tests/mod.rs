@@ -1,1 +1,0 @@
-mod casssandra_tests;

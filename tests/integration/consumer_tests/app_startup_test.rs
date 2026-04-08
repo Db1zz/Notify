@@ -24,14 +24,14 @@ async fn catch_panic_or_timeout(timeout: Duration, handle: JoinHandle<()>) {
         Err(_) => {
             println!("Timeout reached!");
         }
-    }    
+    }
 }
 
 #[tokio::test]
 #[serial]
 #[should_panic]
 async fn test_broker_addr() {
-    start_docker_compose();
+    start_docker_compose().await;
 
     let config = ConsumerConfig {
         topic: "user-notifs".to_owned(),
@@ -50,7 +50,7 @@ async fn test_broker_addr() {
 #[serial]
 #[should_panic]
 pub async fn test_invalid_notifications_to_send_database_addr() {
-	start_docker_compose();
+	start_docker_compose().await;
 	let config = ConsumerConfig {
 		topic: "user-notifs".to_owned(),
 		brokers: "localhost:9092".to_owned(),
@@ -68,7 +68,7 @@ pub async fn test_invalid_notifications_to_send_database_addr() {
 #[serial]
 #[should_panic]
 pub async fn test_invalid_blocked_notifications_database_addr() {
-	start_docker_compose();
+	start_docker_compose().await;
 	let config = ConsumerConfig {
 		topic: "user-notifs".to_owned(),
 		brokers: "localhost:9092".to_owned(),
@@ -86,7 +86,7 @@ pub async fn test_invalid_blocked_notifications_database_addr() {
 #[serial]
 #[should_panic]
 pub async fn test_invalid_client_node_addr() {
-	start_docker_compose();
+	start_docker_compose().await;
 	let config = ConsumerConfig {
 		topic: "user-notifs".to_owned(),
 		brokers: "localhost:9092".to_owned(),
@@ -103,7 +103,7 @@ pub async fn test_invalid_client_node_addr() {
 #[tokio::test]
 #[serial]
 pub async fn test_invalid_metrics_receiver_addr() {
-	start_docker_compose();
+	start_docker_compose().await;
 	let config = ConsumerConfig {
 		topic: "user-notifs".to_owned(),
 		brokers: "localhost:9092".to_owned(),
@@ -124,7 +124,7 @@ pub async fn test_invalid_metrics_receiver_addr() {
 #[tokio::test]
 #[serial]
 pub async fn test_valid_addresses() {
-	start_docker_compose();
+	start_docker_compose().await;
 	let config = ConsumerConfig {
 		topic: "user-notifs".to_owned(),
 		brokers: "localhost:9092".to_owned(),

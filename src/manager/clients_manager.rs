@@ -1,9 +1,20 @@
-use std::{str::FromStr, sync::Arc};
+use std::sync::Arc;
 
 use dashmap::DashMap;
-use futures::lock::Mutex;
-use tokio::{io::AsyncReadExt, net::{TcpListener, tcp::{OwnedReadHalf, OwnedWriteHalf}}};
+use serde::Deserialize;
+use serde_json::Error;
+use tokio::{io::AsyncReadExt, net::{TcpListener, tcp::{OwnedReadHalf, OwnedWriteHalf}}, sync::Mutex};
 use uuid::Uuid;
+
+#[derive(Deserialize)]
+struct ConnectionData {
+	userid: Uuid
+}
+
+struct ConnectedClient {
+	userid: Uuid,
+	reader: OwnedReadHalf
+}
 
 pub struct ClientsManager {
 	listener: Arc<TcpListener>,
@@ -20,42 +31,46 @@ impl ClientsManager {
 		}
 	}
 
-	// TODO: should return an error... also write more descriptive error messages...
 	async fn connect_client_task(
 		connected_clients: Arc<DashMap<Uuid, Arc<Mutex<OwnedWriteHalf>>>>,
 		mut reader: OwnedReadHalf,
-		writer: OwnedWriteHalf)
+		writer: OwnedWriteHalf) -> Result<ConnectedClient, Error>
 	{
 		let mut buf = [0; 1024];
 
 		let rb = reader.read(&mut buf).await.unwrap();
-		let payload = String::from_utf8_lossy(&buf[..rb]);
-		println!("test2: {}", payload); // TODO: VALIDATE THE BUF BY LOOKING FOR A NEWLINE CHAR
-		let json: serde_json::Value = match serde_json::from_str(&payload) {
-			Ok(v) => v,
-			Err(err) => {
-				println!("todo 1 {}", err);				
-				return;
-			}
-		};
+		let connection_data = serde_json::from_slice::<ConnectionData>(&buf[..rb])?;
+		connected_clients.insert(connection_data.userid.clone(), Arc::new(Mutex::new(writer)));
 
-		let user_id: String = match json.get("userid").and_then(|v| v.as_str()) {
-			Some(s) => s.to_string(),
-			None => {
-				println!("Error! Expected JSON \"userid\":\"123\"");
-				return;
-			}
-		};
+		Ok(ConnectedClient {
+			userid: connection_data.userid,
+			reader
+		})
+	}
 
-		let uuid: Uuid = match Uuid::from_str(&user_id) {
-			Ok(u) => u, 
-			Err(err) => {
-				println!("todo 3 {}", err);
-				return;
-			}
-		};
+	async fn watch_client_disconnect(
+		connected_clients: Arc<DashMap<Uuid, Arc<Mutex<OwnedWriteHalf>>>>,
+		mut client: ConnectedClient)
+	{
+		let mut buf = [0; 1024];
 
-		connected_clients.insert(uuid, Arc::new(Mutex::new(writer)));
+		loop {
+			match client.reader.read(&mut buf).await {
+				Ok(0) => {
+					println!("A client has been disconnected");
+					break;
+				}
+				Ok(_) => continue,
+				Err(err) => {
+					println!("error: {err}");
+                	break;
+				}
+			}
+		}
+
+		if connected_clients.remove(&client.userid).is_none() {
+			// TODO
+		}
 	}
 
 	pub async fn listen(&self) {
@@ -65,8 +80,16 @@ impl ClientsManager {
 
 			tokio::spawn(async move {
 				let (reader, writer) = socket.into_split();
-				Self::connect_client_task(cloned_connected_clients, reader, writer).await;
-				println!("A new client connected to the server {}", client_addr);
+				let result = Self::connect_client_task(cloned_connected_clients.clone(), reader, writer).await;
+				match result {
+					Ok(client) => {
+						println!("A new client connected to the server {}", client_addr);
+						Self::watch_client_disconnect(cloned_connected_clients, client).await;
+					}
+					Err(err) => {
+						eprintln!("Failed to establish connection with a client: {}", err);
+					}
+				}
 			});
 		}
 	}

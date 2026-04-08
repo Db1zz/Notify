@@ -1,1 +1,2 @@
-pub mod repository_tests;
+pub mod casssandra_tests;
+pub mod client_manager_tests;
