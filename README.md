@@ -1,5 +1,5 @@
-# TODO List
-* Tests
+## Todo List:
+Logs
 
 ## The idea:
 
