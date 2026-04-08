@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use dashmap::DashMap;
 use serde::Deserialize;
-use serde_json::Error;
 use tokio::{io::AsyncReadExt, net::{TcpListener, tcp::{OwnedReadHalf, OwnedWriteHalf}}, sync::Mutex};
 use uuid::Uuid;
 

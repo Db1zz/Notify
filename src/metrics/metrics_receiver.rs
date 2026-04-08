@@ -1,7 +1,7 @@
 use std::{net::SocketAddr, sync::Arc, time::Instant};
 use dashmap::DashMap;
 use tokio::{io::{AsyncBufReadExt, BufReader}, net::{TcpListener, TcpStream}, sync::mpsc::{self, Receiver, Sender}, time::{Duration, timeout}};
-use tracing::{Instrument, debug, error, info, instrument, warn};
+use tracing::{Instrument, error, info, instrument, warn};
 
 use crate::metrics::{ConnectionLost, Message};
 

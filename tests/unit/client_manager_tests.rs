@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod tests {
     use Notify::manager::ClientsManager;
-    use futures::stream;
     use serial_test::serial;
     use std::sync::Arc;
     use tokio::{
