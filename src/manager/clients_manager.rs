@@ -34,12 +34,17 @@ impl ClientsManager {
 	async fn connect_client_task(
 		connected_clients: Arc<DashMap<Uuid, Arc<Mutex<OwnedWriteHalf>>>>,
 		mut reader: OwnedReadHalf,
-		writer: OwnedWriteHalf) -> Result<ConnectedClient, Error>
+		writer: OwnedWriteHalf) -> Result<ConnectedClient, ConnectionError>
 	{
 		let mut buf = [0; 1024];
 
 		let rb = reader.read(&mut buf).await.unwrap();
 		let connection_data = serde_json::from_slice::<ConnectionData>(&buf[..rb])?;
+
+		if connected_clients.contains_key(&connection_data.userid) {
+			return Err(ConnectionError::AlreadyConnected(connection_data.userid));
+		}
+
 		connected_clients.insert(connection_data.userid.clone(), Arc::new(Mutex::new(writer)));
 
 		Ok(ConnectedClient {
@@ -94,6 +99,10 @@ impl ClientsManager {
 		}
 	}
 
+	pub fn get_clients_count(&self) -> usize {
+		self.connected_clients.len()
+	}
+
 	pub fn get_client(&self, id: Uuid) -> Option<Arc<Mutex<OwnedWriteHalf>>> {
 		self.connected_clients
 			.get(&id)
@@ -107,4 +116,13 @@ impl ClientsManager {
 	pub fn get_addr(&self) -> &String {
 		return &self.addr;
 	}
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum ConnectionError {
+    #[error(transparent)]
+    Serialize(#[from] serde_json::Error),
+
+    #[error("User with id {0} is already connected")]
+    AlreadyConnected(Uuid),
 }

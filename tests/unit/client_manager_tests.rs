@@ -1,118 +1,185 @@
 #[cfg(test)]
 mod tests {
     use Notify::manager::ClientsManager;
+    use futures::stream;
     use serial_test::serial;
+    use std::sync::Arc;
     use tokio::{
         io::AsyncWriteExt,
         net::TcpStream,
-        time::{sleep, Duration},
+        time::{sleep, Duration, Instant},
     };
     use uuid::Uuid;
 
-    async fn start_manager(addr: &str) -> ClientsManager {
-        let manager = ClientsManager::new(addr.to_string()).await;
+    async fn start_manager(addr: &str) -> Arc<ClientsManager> {
+        let manager = Arc::new(ClientsManager::new(addr.to_string()).await);
 
-        let runner = ClientsManager {
-            listener: manager.listener.clone(),
-            connected_clients: manager.connected_clients.clone(),
-            addr: manager.addr.clone(),
-        };
-
+        let listener = manager.clone();
         tokio::spawn(async move {
-            runner.listen().await;
+            listener.listen().await;
         });
 
-        // Даём listener'у время подняться
         sleep(Duration::from_millis(100)).await;
-
         manager
     }
 
-    async fn send_payload(addr: &str, payload: &str) {
+    async fn register_client(addr: &str, userid: Uuid) -> TcpStream {
         let mut stream = TcpStream::connect(addr).await.unwrap();
+        let payload = serde_json::json!({ "userid": userid }).to_string();
+
         stream.write_all(payload.as_bytes()).await.unwrap();
-        let _ = stream.shutdown().await;
+        stream.flush().await.unwrap();
+
+        stream
     }
 
-    async fn wait_until_client_exists(
-        manager: &ClientsManager,
-        id: Uuid,
+    async fn wait_for_state(
+        manager: &Arc<ClientsManager>,
+        userid: Uuid,
+        expected_present: bool,
         timeout_dur: Duration,
     ) -> bool {
-        let start = tokio::time::Instant::now();
+        let deadline = Instant::now() + timeout_dur;
 
-        while start.elapsed() < timeout_dur {
-            if manager.get_client(id).is_some() {
+        loop {
+            let is_present = manager.get_client(userid).is_some();
+            if is_present == expected_present {
                 return true;
             }
-            sleep(Duration::from_millis(50)).await;
-        }
 
-        false
+            if Instant::now() >= deadline {
+                return false;
+            }
+
+            sleep(Duration::from_millis(25)).await;
+        }
     }
 
     #[tokio::test]
     #[serial]
-    async fn registers_client_by_userid() {
+    async fn registers_client_and_returns_it_from_map() {
         let addr = "127.0.0.1:19079";
         let manager = start_manager(addr).await;
 
-        let user_id = Uuid::new_v4();
-        let payload = format!(r#"{{"userid":"{}"}}"#, user_id) + "\n";
+        let userid = Uuid::new_v4();
+        let stream = register_client(addr, userid).await;
 
-        send_payload(addr, &payload).await;
+        assert!(
+            wait_for_state(&manager, userid, true, Duration::from_secs(2)).await,
+            "client should appear in DashMap"
+        );
 
-        let found = wait_until_client_exists(&manager, user_id, Duration::from_secs(2)).await;
-        assert!(found, "client should be registered in ClientsManager");
+        assert!(manager.get_client(userid).is_some());
+
+        drop(stream);
     }
 
     #[tokio::test]
     #[serial]
-    async fn destroy_client_removes_it_from_map() {
+    async fn removes_client_after_unexpected_disconnect() {
         let addr = "127.0.0.1:19080";
         let manager = start_manager(addr).await;
 
-        let user_id = Uuid::new_v4();
-        let payload = format!(r#"{{"userid":"{}"}}"#, user_id) + "\n";
-
-        send_payload(addr, &payload).await;
-
-        let found = wait_until_client_exists(&manager, user_id, Duration::from_secs(2)).await;
-        assert!(found, "client should be registered before removal");
-
-        manager.destroy_client(user_id);
+        let userid = Uuid::new_v4();
+        let stream = register_client(addr, userid).await;
 
         assert!(
-            manager.get_client(user_id).is_none(),
-            "client should be removed from ClientsManager"
+            wait_for_state(&manager, userid, true, Duration::from_secs(2)).await,
+            "client should be registered before disconnect"
+        );
+
+        drop(stream);
+
+        assert!(
+            wait_for_state(&manager, userid, false, Duration::from_secs(3)).await,
+            "client should be removed after disconnect"
         );
     }
 
     #[tokio::test]
     #[serial]
-    async fn invalid_json_does_not_register_client() {
+    async fn invalid_payload_does_not_register_client() {
         let addr = "127.0.0.1:19081";
         let manager = start_manager(addr).await;
 
-        let user_id = Uuid::new_v4();
+        let mut stream = TcpStream::connect(addr).await.unwrap();
+        stream.write_all(b"{not valid json").await.unwrap();
+        stream.flush().await.unwrap();
 
-        send_payload(addr, r#"{"bad_json": true}"#).await;
+        sleep(Duration::from_millis(200)).await;
 
-        let found = wait_until_client_exists(&manager, user_id, Duration::from_secs(500)).await;
-        assert!(!found, "invalid payload must not register a client");
+        assert_eq!(manager.get_clients_count(), 0);
     }
 
     #[tokio::test]
     #[serial]
-    async fn missing_userid_does_not_register_client() {
+    async fn destroy_client_removes_it_manually() {
         let addr = "127.0.0.1:19082";
         let manager = start_manager(addr).await;
 
-        let user_id = Uuid::new_v4();
+        let userid = Uuid::new_v4();
+        let stream = register_client(addr, userid).await;
 
-        send_payload(addr, r#"{"something_else":"123"}"#).await;
+        assert!(
+            wait_for_state(&manager, userid, true, Duration::from_secs(2)).await,
+            "client should be registered"
+        );
 
-        let found = wait_until_client_exists(&manager, user_id, Duration::from_secs(500)).await;
-        assert!(!found, "payload without userid must not register a client");
+        manager.destroy_client(userid);
+
+        assert!(
+            wait_for_state(&manager, userid, false, Duration::from_secs(2)).await,
+            "client should be removed by destroy_client"
+        );
+
+        drop(stream);
     }
+
+	#[tokio::test]
+	async fn repeated_userid_is_an_error() {
+		use tokio::io::{AsyncReadExt, AsyncWriteExt};
+		use tokio::time::{timeout, Duration};
+
+		let addr = "127.0.0.1:19100";
+		let manager = ClientsManager::new(addr.to_string()).await;
+
+		let manager = Arc::new(manager);
+		let runner = manager.clone();
+
+		tokio::spawn(async move {
+			runner.listen().await;
+		});
+
+		tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+		let userid = Uuid::new_v4();
+
+		let payload = serde_json::json!({ "userid": userid }).to_string();
+
+		let mut stream1 = TcpStream::connect(addr).await.unwrap();
+		stream1.write_all(payload.as_bytes()).await.unwrap();
+
+		tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+		assert!(
+			manager.get_client(userid).is_some(),
+			"first client not registered"
+		);
+
+		let mut stream2 = TcpStream::connect(addr).await.unwrap();
+		stream2.write_all(payload.as_bytes()).await.unwrap();
+
+		let mut buf = [0u8; 1];
+		match timeout(Duration::from_secs(1), stream2.read(&mut buf)).await {
+			Ok(Ok(0)) => {}
+			Ok(Ok(n)) => panic!("expected second socket to be closed, got {n} bytes"),
+			Ok(Err(e)) => panic!("read error: {e}"),
+			Err(_) => panic!("server did not close second socket in time"),
+		}
+
+		assert_eq!(manager.get_clients_count(), 1);
+
+		drop(stream1);
+		drop(stream2);
+	}
 }
