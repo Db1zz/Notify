@@ -60,6 +60,8 @@ pub async fn start(config: ConsumerConfig) {
         clients_manager,
         task_manager,
         config.metrics_receiver_addr);
+        
+    println!("Service is successfully started!");
 
     notification_service.start().await;
 

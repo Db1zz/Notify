@@ -46,7 +46,8 @@ where
 			Some(client) => {
 				// TODO: some error handling
 				let mut writer = client.lock().await;
-				writer.write_all(notification.sourceid.as_bytes()).await;
+				writer.write_all((notification.sourceid.to_string() + "\n").as_bytes()).await;
+				println!("notification.sourceid.as_bytes(): {}", notification.sourceid);
 				return true;
 			},
 			None => {
@@ -74,6 +75,7 @@ where
 		};
 
 		if is_notif_blocked {
+			println!("Notification is blocked by user, i'm not sending it to him...");
 			return;
 		}
 
@@ -187,7 +189,8 @@ where
 				}
 			};
 
-			let task = NotificationServiceTask::new(notification,
+			let task = NotificationServiceTask::new(
+				notification,
 				self.repo_notifs_to_send.clone(),
 				self.repo_blocked_notifs.clone(),
 				self.clients_manager.clone(),

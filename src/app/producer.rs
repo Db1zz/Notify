@@ -8,7 +8,8 @@ use crate::config::ProducerConfig;
 
 // TODO redesign this shit bro wtf lmao
 pub async fn start(config: ProducerConfig) {
-    let producer: Arc<FutureProducer> = Arc::new(ClientConfig::new()
+    let producer: Arc<FutureProducer> = Arc::new(
+		ClientConfig::new()
         .set("bootstrap.servers", config.brokers)
         .set("message.timeout.ms", "5000")
         .create()

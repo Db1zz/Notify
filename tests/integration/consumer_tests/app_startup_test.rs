@@ -4,7 +4,7 @@ use serial_test::serial;
 use Notify::{app::consumer, config::ConsumerConfig};
 use tokio::task::JoinHandle;
 
-use crate::integration::consumer_tests::utils::start_docker_compose;
+use crate::utils::start_docker_compose;
 
 async fn catch_panic_or_timeout(timeout: Duration, handle: JoinHandle<()>) {
     match tokio::time::timeout(timeout, handle).await {

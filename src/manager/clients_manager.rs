@@ -30,10 +30,11 @@ impl ClientsManager {
 
 		let rb = reader.read(&mut buf).await.unwrap();
 		let payload = String::from_utf8_lossy(&buf[..rb]);
+		println!("test2: {}", payload); // TODO: VALIDATE THE BUF BY LOOKING FOR A NEWLINE CHAR
 		let json: serde_json::Value = match serde_json::from_str(&payload) {
 			Ok(v) => v,
 			Err(err) => {
-				println!("todo 1 {}", err);
+				println!("todo 1 {}", err);				
 				return;
 			}
 		};
@@ -41,7 +42,7 @@ impl ClientsManager {
 		let user_id: String = match json.get("userid").and_then(|v| v.as_str()) {
 			Some(s) => s.to_string(),
 			None => {
-				println!("Error! Expected JSON \"user_id\":\"123\"");
+				println!("Error! Expected JSON \"userid\":\"123\"");
 				return;
 			}
 		};

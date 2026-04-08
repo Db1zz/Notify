@@ -4,12 +4,12 @@ use Notify::{app, config::ConsumerConfig, metrics::{metrics_receiver::MetricsRec
 use serial_test::serial;
 use tokio::time;
 
-use crate::integration::consumer_tests::utils::start_docker_compose;
+use crate::utils::start_docker_compose;
 
 #[tokio::test]
 #[serial]
 async fn test_metrics_sender_reconnection() {
-	start_docker_compose();
+	start_docker_compose().await;
 
 	let receiver_addr = "0.0.0.0:1234".to_owned();
 
@@ -36,7 +36,7 @@ async fn test_metrics_sender_reconnection() {
 	let node = receiver.get_least_loaded_consumer_node().await.unwrap();
 	assert!(!node.is_empty());
 
-	time::sleep(Duration::from_secs(10)).await;
+	time::sleep(Duration::from_secs(6)).await;
 	handle.abort();
 
 	receiver_clone = receiver.clone();

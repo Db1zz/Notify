@@ -11,6 +11,6 @@ load_balancer:
   load_balancer_metrics_addr: "0.0.0.0:6979"
 
 producer:
-  producer_addr: "localhost:9092"
+  producer_addr: "0.0.0.0:8992"
   topic: "user-notifs"
   brokers: "localhost:9092"
