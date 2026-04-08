@@ -1,11 +1,9 @@
 use std::{net::SocketAddr, sync::Arc, time::Instant};
-
 use dashmap::DashMap;
 use tokio::{io::{AsyncBufReadExt, BufReader}, net::{TcpListener, TcpStream}, sync::mpsc::{self, Receiver, Sender}, time::{Duration, timeout}};
+use tracing::{Instrument, debug, error, info, instrument, warn};
 
 use crate::metrics::{ConnectionLost, Message};
-
-const PREFIX: &str = "LOAD BALANCER";
 
 struct ClientInfo {
 	pub load: f64,
@@ -25,12 +23,20 @@ impl MetricsReceiver {
 		}
 	}
 
+	#[instrument(
+		skip(socket, tx),
+		fields(
+			cl_addr = %client_addr,
+			public_addr = tracing::field::Empty
+		)
+	)]
 	async fn handle_connection(socket: TcpStream, tx: Sender<Message>, client_addr: SocketAddr) {
 		let (reader, _writer) = socket.into_split();
-
 		let mut breader = BufReader::new(reader);
 		let mut line = String::new();
 		let mut client_public_addr = String::new();
+
+		info!("New connection established");
 
 		loop {
 			line.clear();
@@ -38,7 +44,7 @@ impl MetricsReceiver {
 			let read_res = timeout(Duration::from_secs(10), breader.read_line(&mut line)).await;
 			match read_res {
 				Ok(Ok(0)) => {
-					println!("[{}] Client {} disconnected", PREFIX, client_addr.to_string());
+					info!("Client disconnected (EOF)");
 					break;
 				}
 				Ok(Ok(_)) => {
@@ -47,27 +53,32 @@ impl MetricsReceiver {
 							if client_public_addr.is_empty() {
 								if let Message::Register(data) = &msg {
 									client_public_addr = data.public_addr.clone();
+									tracing::Span::current().record("public_addr", &data.public_addr);
+                                	info!("Client registered successfully");
 								} else {
-									eprintln!("Client should register first...");
+									warn!("Protocol violation: First message must be Register");
 									return;
 								}
 							}
 
-							let _ = tx.send(msg).await;
+							if let Err(e) = tx.send(msg).await {
+								error!(error = ?e, "Internal channel closed");
+								break;
+							};
 							continue;
 						}
 						Err(e) => {
-							eprintln!("bad json from {}: {:?}", client_addr, e);
+							error!(error = ?e, raw_line = %line.trim(), "Invalid JSON received");
 							break;
 						}
 					}
 				},
 				Ok(Err(e)) => {
-					eprintln!("read error from {}: {:?}", client_addr, e);
+					error!(error = ?e, "TCP read error");
 					break;
 				}
 				Err(_) => {
-					eprintln!("idle timeout for {}", client_addr);
+					warn!("Connection timed out after 10s of inactivity");
 					break;
 				}
 			}
@@ -123,26 +134,28 @@ impl MetricsReceiver {
 		}
 	}
 
+	#[instrument(skip(self))]
 	pub async fn start(&self) {
 		let (tx, rx) = mpsc::channel::<Message>(1024);
-
 		let clients = self.clients.clone();
+
 		tokio::spawn(Self::message_handler(rx, clients));
 
 		loop {
 			let (socket, client_addr) =  match self.listener.accept().await {
 				Ok(v) => v,
 				Err(e) => {
-					eprintln!("accept error: {:?}", e);
+					warn!(error = ?e, "TCP accept error");
 					continue;
 				}
 			};
 
+			let connection_span = tracing::info_span!("connection_worker", service = "mterics_receiver");
 			tokio::spawn(Self::handle_connection(
 				socket,
 				tx.clone(),
 				client_addr
-			));
+			).instrument(connection_span));
 		}
 	}
 }
