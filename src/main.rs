@@ -59,6 +59,12 @@ async fn main() {
 
     let cli = Cli::parse();
 
+    tracing_subscriber::fmt()
+            .with_target(true) // - shows which module/service the log came from
+            .with_thread_ids(true)
+            .with_level(true)
+            .init();
+
     match cli.command {
         Service::Consumer => {
             app::consumer::start(config.consumer.unwrap()).await;

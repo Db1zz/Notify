@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use tokio::io::AsyncWriteExt;
 use tokio::time::sleep;
+use tracing::{Instrument, debug, error, info, instrument, warn};
 
 use crate::manager::task_manager::{TaskManager, TaskManagerTask};
 use crate::metrics::metrics_sender::MetricsSender;
@@ -41,16 +42,23 @@ where
 		}
 	}
 
+	#[instrument(
+		skip(self, notification),
+		fields(userid = %notification.userid)
+	)]
 	async fn send_notification(&self, notification: &Notification) -> bool {
 		match self.clients_manager.get_client(notification.userid) {
 			Some(client) => {
-				// TODO: some error handling
 				let mut writer = client.lock().await;
-				writer.write_all((notification.sourceid.to_string() + "\n").as_bytes()).await;
-				println!("notification.sourceid.as_bytes(): {}", notification.sourceid);
+				if let Err(e) = writer.write_all((notification.sourceid.to_string() + "\n").as_bytes()).await {
+					error!("Failed to write to client: {:?}", e);
+					return false;
+				}
+				debug!(source_id = %notification.sourceid, "Notification sent successfully");
 				return true;
 			},
 			None => {
+				warn!("Client not found in manager");
 				return false;
 			}
 		}
@@ -63,25 +71,29 @@ where
 	NotifsToSendRepo: Repository<Item = Notification> + 'static,
 	BlockedNotifsRepo: Repository<Item = Notification> + 'static,
 {
+	#[instrument(
+		skip(self),
+		fields(notif_id = %self.notification.sourceid)
+	)]
 	async fn handle(&self) {
 		let started_at = Instant::now();
 		let is_notif_blocked: bool = match self.repo_blocked_notifs.get(&self.notification).await {
 			Ok(_) => true,
 			Err(RepositoryError::NotFound(_)) => false,
 			Err(e) => {
-				println!("DB Error: {:?}", e);
+				error!(error = ?e, "Database error checking blocked status");
 				return;
 			}
 		};
 
 		if is_notif_blocked {
-			println!("Notification is blocked by user, i'm not sending it to him...");
+			info!("Notification is blocked by user; skipping");
 			return;
 		}
 
 		let is_sent = self.send_notification(&self.notification).await;
 		if !is_sent {
-			println!("Failed to send notification to a client, pushing to the database");
+			info!("Failed to send notification to a client, pushing to the database");
 			let _ = self.repo_notifs_to_send.post(&self.notification).await;
 		}
 
@@ -130,36 +142,63 @@ where
 			receiver_addr
 		}
 	}
-	
+
+	#[instrument(
+		skip(receiver_addr, public_addr),
+		fields(
+			receiver = %receiver_addr, 
+			public = %public_addr
+		)
+	)]
 	async fn connect_and_register(receiver_addr: String, public_addr: String) -> MetricsSender {
-		let mut sender = MetricsSender::new(receiver_addr.clone());
+		let mut sender = MetricsSender::new(receiver_addr);
 
 		let register = Register {
 			public_addr: public_addr.clone(),
 			role: NodeRole::NotificationService
 		};
 
+		let mut attempts = 0;
+
 		while let Err(e) = sender.register(register.clone()).await {
-			eprintln!("Error: Failed to register the metrics sender {} with receiver {}\nInfo: {:?}", public_addr, receiver_addr, e);
+			attempts += 1;
+			warn!(
+				error = ?e, 
+				attempt = attempts,
+				"Registration failed, retrying in 2s..."
+			);
 			sleep(Duration::from_secs(2)).await;
 		}
 
+		info!("Successfully registered metrics sender");
 		sender
 	}
 
+	#[instrument(
+		skip(self),
+		fields(receiver = %self.receiver_addr)
+	)]
 	async fn spawn_metrics_reporter(&self) {
 		let metrics = self.metrics.clone();
 		let public_addr = self.clients_manager.get_addr().clone();
-
 		let receiver_addr = self.receiver_addr.clone();
+
+		let worker_span = tracing::info_span!(
+			"metrics_reporter",
+			receiver = %receiver_addr,
+			public = %public_addr
+    	);
+
 		tokio::spawn(async move {
+			info!("Metrics reporter worker started");
+
 			loop {
 				let mut sender = Self::connect_and_register(
 						receiver_addr.clone(),
-						public_addr.clone())
-					.await;
+						public_addr.clone()
+				).await;
 
-				println!("Connected to the metrics receiver {}", receiver_addr);
+				info!("Connected and registered with receiver");
 
 				loop {
 					let metrics = Metrics {
@@ -169,22 +208,23 @@ where
 	
 					let result = sender.send(Message::Metrics(metrics)).await;
 					if let Err(e) = result {
-						eprintln!("Error: Failed to send metrics to the receiver {}\nInfo: {:?}", receiver_addr, e);
+						warn!(error = ?e, "Connection lost; attempting to reconnect...");
 						break;
 					}
 
 					sleep(Duration::from_secs(5)).await;
 				}
 			}
-		});
+		}.instrument(worker_span));
 	}
 
+	#[instrument(skip(self))]
 	async fn run_notification_consumer(&mut self) {
 		loop {
 			let notification = match self.consumer.recv().await {
 				Ok(notification) => notification,
 				Err(e) => {
-					println!("Failed to receive a notification: {:?}", e);
+					warn!(error = ?e, "Failed to receive a notification");
 					continue;
 				}
 			};
