@@ -1,5 +1,11 @@
 use std::{time::Duration, vec};
 
+use notify::{
+    app,
+    config::ConsumerConfig,
+    models::notification::Notification,
+    repository::{cassandra_repository::BlockedNotificationsCassandra, types::Repository},
+};
 use rdkafka::{
     message::ToBytes,
     producer::{FutureProducer, FutureRecord},
@@ -13,12 +19,6 @@ use tokio::{
     time::{sleep, timeout},
 };
 use uuid::Uuid;
-use notify::{
-    app,
-    config::ConsumerConfig,
-    models::notification::Notification,
-    repository::{cassandra_repository::BlockedNotificationsCassandra, types::Repository},
-};
 
 use crate::utils::start_docker_compose;
 

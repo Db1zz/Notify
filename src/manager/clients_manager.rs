@@ -34,7 +34,7 @@ impl ClientsManager {
         Self {
             listener: Arc::new(TcpListener::bind(addr.clone()).await.unwrap()),
             connected_clients: Arc::new(DashMap::new()),
-            addr
+            addr,
         }
     }
 

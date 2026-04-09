@@ -1,8 +1,8 @@
 use std::{sync::Arc, time::Duration};
 
+use notify::{app, config::ConsumerConfig, metrics::metrics_receiver::MetricsReceiver};
 use serial_test::serial;
 use tokio::time;
-use notify::{app, config::ConsumerConfig, metrics::metrics_receiver::MetricsReceiver};
 
 use crate::utils::start_docker_compose;
 

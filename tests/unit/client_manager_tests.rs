@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    use notify::manager::ClientsManager;
     use serial_test::serial;
     use std::sync::Arc;
     use tokio::{
@@ -8,7 +9,6 @@ mod tests {
         time::{sleep, Duration, Instant},
     };
     use uuid::Uuid;
-    use notify::manager::ClientsManager;
 
     async fn start_manager(addr: &str) -> Arc<ClientsManager> {
         let manager = Arc::new(ClientsManager::new(addr.to_string()).await);

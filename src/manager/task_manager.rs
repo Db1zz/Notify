@@ -1,10 +1,8 @@
 use async_trait::async_trait;
 use futures::{channel::mpsc, SinkExt};
-use std::{
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
 };
 use tokio::sync::Mutex;
 use tracing::{error, instrument};

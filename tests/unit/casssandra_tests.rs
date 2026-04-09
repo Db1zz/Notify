@@ -1,5 +1,3 @@
-use scylla::client::session_builder::SessionBuilder;
-use uuid::Uuid;
 use notify::{
     models::notification::Notification,
     repository::{
@@ -7,6 +5,8 @@ use notify::{
         types::Repository,
     },
 };
+use scylla::client::session_builder::SessionBuilder;
+use uuid::Uuid;
 
 use crate::utils::start_docker_compose;
 

@@ -128,12 +128,8 @@ impl MetricsReceiver {
             .min_by(|a, b| a.value().load.partial_cmp(&b.value().load).unwrap());
 
         match result {
-            Some(node) => {
-                Ok(node.key().clone())
-            }
-            None => {
-                Err(MetricsReceiverError::NoSenders)
-            }
+            Some(node) => Ok(node.key().clone()),
+            None => Err(MetricsReceiverError::NoSenders),
         }
     }
 
