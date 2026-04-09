@@ -1,5 +1,5 @@
 ## Todo List:
-Logs
+README
 
 ## The idea:
 
