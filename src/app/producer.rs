@@ -2,11 +2,13 @@ use std::time::Duration;
 use rdkafka::{ClientConfig, producer::{FutureProducer, FutureRecord}};
 
 use tokio::{io::AsyncReadExt, net::TcpListener};
+use tracing::{instrument, info};
 use std::sync::Arc;
 
 use crate::config::ProducerConfig;
 
 // TODO redesign this shit bro wtf lmao
+#[instrument(skip(config))]
 pub async fn start(config: ProducerConfig) {
     let producer: Arc<FutureProducer> = Arc::new(
 		ClientConfig::new()
@@ -16,11 +18,11 @@ pub async fn start(config: ProducerConfig) {
         .expect("Producer creation error"));
 
 	let listener = TcpListener::bind(config.producer_addr.clone()).await.unwrap();
-	println!("Socket server started on {}", config.producer_addr);
+	// info!("Socket server started on {}", config.producer_addr);
 
     loop {
         let (mut socket, client_addr) = listener.accept().await.unwrap();
-		println!("Client connected: {}", client_addr);
+		info!(cl_addr = client_addr.to_string(), "Client connected");
 		
 		let producer = producer.clone();
 		let topic = config.topic.clone();
@@ -29,7 +31,7 @@ pub async fn start(config: ProducerConfig) {
 				let mut buf = [0; 1024];
 				let n = socket.read(&mut buf).await.unwrap();
 
-				if n == 0 { // TCP is closed...
+				if n == 0 {
 					return;
 				}
 

@@ -2,6 +2,7 @@ use std::str::Utf8Error;
 
 use async_trait::async_trait;
 use rdkafka::{Message, consumer::StreamConsumer, error::KafkaError, message::BorrowedMessage};
+use tracing::{instrument, debug};
 
 use crate::consumer::NotificationStreamConsumer;
 use crate::models::notification::Notification;
@@ -15,13 +16,14 @@ impl KafkaNotificationStreamConsumer {
 		Self { consumer }
 	}
 
+	#[instrument(skip(self, message))]
 	fn parse_notification(&self, message: &BorrowedMessage) -> Result<Notification, ParseError> {
 		let payload = message
 			.payload_view::<str>()
 			.ok_or(ParseError::MissingPayload)?
 			.map_err(ParseError::Utf8)?;
 
-		println!("Payload: {}", payload);
+		debug!(payload = payload, "Message payload");
 
 		let notification = serde_json::from_str::<Notification>(payload)
 			.map_err(|e| ParseError::Parse(e))?;

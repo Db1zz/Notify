@@ -3,6 +3,7 @@ use std::sync::Arc;
 use rdkafka::ClientConfig;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use scylla::client::session_builder::SessionBuilder;
+use tracing::{instrument, info};
 
 use crate::config::ConsumerConfig;
 use crate::consumer::KafkaNotificationStreamConsumer;
@@ -12,6 +13,7 @@ use crate::repository::cassandra_repository::BlockedNotificationsCassandra;
 use crate::repository::cassandra_repository::NotificationsToSendCassandra;
 use crate::service::NotificationService;
 
+#[instrument(skip(config))]
 pub async fn start(config: ConsumerConfig) {
     let mut client_config: ClientConfig = ClientConfig::new();
 
@@ -61,11 +63,11 @@ pub async fn start(config: ConsumerConfig) {
         task_manager,
         config.metrics_receiver_addr);
         
-    println!("Service is successfully started!");
+    info!("Service is successfully started!");
 
     notification_service.start().await;
 
     tokio::signal::ctrl_c().await
         .expect("Failed to listen ctrl + c");
-    println!("Shutdown signal received, waiting for workers to exit");
+    info!("Shutdown signal received, waiting for workers to exit");
 }
