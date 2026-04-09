@@ -3,73 +3,49 @@
 ![2026-04-09 08 50 12](https://github.com/user-attachments/assets/19c52c62-7a91-4157-934c-17ce536eac21)
 
 ## What is it?
-is a Rust notification service built for running as separate, independently scalable components.
+**Notify** is a distributed, high-performance notification engine written entirely in **Rust**. Built for the **Anteiku.** ecosystem, it is engineered to handle thousands of concurrent notifications per second with sub-millisecond overhead.
 
-It is split into three runtime roles:
+The system is designed with a **cloud-native approach**, allowing you to scale individual components (Producers, Consumers, and Load Balancers) independently based on your traffic patterns.
 
-- **Producer** — accepts notification data and publishes it to Kafka.
-- **Consumer** — reads notification events from Kafka and processes them.
-- **Load Balancer** — routes traffic to available nodes.
-
-The project is designed to be simple to scale by running multiple nodes across one or more machines.
-
-## Features
-
-- **Kafka-based** notification pipeline
-- **Cassandra-backed** storage
-- **Separate producer, consumer, and load balancer** services
-- **Async** runtime built on Tokio
-- **Structured logging** with `tracing`
-- **YAML-based** configuration
-- **Docker Compose** setup for local development
+## Third Party Packages
+Notify uses many different third party packages to do it's thing, and these packages are maintained by third-parties and are **NOT** evaluated by the Notify developers.
 
 ## Requirements
-
 - Rust / Cargo
 - Docker
 - Docker Compose
 
-## Configuration
-
-Notify reads configuration from `./config.yaml` by default.
-
-### Example configuration:
-
+## Usage
+Notify is configured via a single YAML file. Below is an example configuration optimized for **local development**:
 
 ```yaml
-
 consumer:
-
   topic: "user-notifs"
-
   brokers: "localhost:9092"
-
   notifications_to_send_database_addr: "127.0.0.1:9042"
-
   blocked_notifications_database_addr: "127.0.0.1:9042"
-
   clients_node_addr: "127.0.0.1:6969"
-
-  metrics_receiver_addr: "0.0.0.0:6979"
-
+  metrics_receiver_addr: "127.0.0.1:6979"
 
 load_balancer:
-
   load_balancer_addr: "0.0.0.0:8989"
-
   load_balancer_metrics_addr: "0.0.0.0:6979"
 
-
 producer:
-
   producer_addr: "0.0.0.0:8992"
-
   topic: "user-notifs"
-
   brokers: "localhost:9092"
+```
 
-``` 
+### VERY IMPORTANT NOTE
+Currently, Notify expects a specific schema and table names to be present in your Cassandra instance.
 
+Schema Initialization:
+The project includes a schema.cql file and an init.sh script to automate this. If you are using Docker, you can set init.sh as your container's entrypoint or execute it manually:
+```bash
+# Example: Running the init script inside a docker container
+docker exec -it <cassandra_container_name> cqlsh -f /path/to/schema.cql
+```
 ## Configuration notes
 
 - **brokers** should point to your Kafka broker.
