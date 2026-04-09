@@ -49,10 +49,7 @@ async fn wait_for_kafka(addr: SocketAddr, timeout_dur: Duration) {
 
 async fn wait_for_cassandra(addr: &str) {
     for _ in 0..60 {
-        let res = SessionBuilder::new()
-            .known_node(addr)
-            .build()
-            .await;
+        let res = SessionBuilder::new().known_node(addr).build().await;
 
         if res.is_ok() {
             println!("Cassandra is up!");

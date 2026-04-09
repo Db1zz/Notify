@@ -1,35 +1,37 @@
-use std::{sync::atomic::{AtomicU64, AtomicUsize, Ordering}, time::Duration};
+use std::{
+    sync::atomic::{AtomicU64, AtomicUsize, Ordering},
+    time::Duration,
+};
 
 #[derive(Debug, Default)]
 pub struct LoadMetrics {
-	queue_size: AtomicUsize,
-	latency_sum_ms: AtomicU64,
-	latency_samples: AtomicU64,
+    queue_size: AtomicUsize,
+    latency_sum_ms: AtomicU64,
+    latency_samples: AtomicU64,
 }
 
 impl LoadMetrics {
-	pub fn new() -> Self {
-		Self::default()
-	}
+    pub fn new() -> Self {
+        Self::default()
+    }
 
-	pub fn inc_queue(&self) {
-		self.queue_size.fetch_add(1, Ordering::Relaxed);
-	}
+    pub fn inc_queue(&self) {
+        self.queue_size.fetch_add(1, Ordering::Relaxed);
+    }
 
-	pub fn dec_queue(&self) {
-		let _ = self.queue_size.fetch_update(
-			Ordering::Relaxed,
-			Ordering::Relaxed,
-			|v| v.checked_sub(1));
-	}
+    pub fn dec_queue(&self) {
+        let _ = self
+            .queue_size
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| v.checked_sub(1));
+    }
 
-	pub fn record_latency(&self, latency: Duration) {
-		let ms = latency.as_millis() as u64;
-		self.latency_sum_ms.fetch_add(ms, Ordering::Relaxed);
+    pub fn record_latency(&self, latency: Duration) {
+        let ms = latency.as_millis() as u64;
+        self.latency_sum_ms.fetch_add(ms, Ordering::Relaxed);
         self.latency_samples.fetch_add(1, Ordering::Relaxed);
-	}
+    }
 
-	 pub fn queue_size(&self) -> usize {
+    pub fn queue_size(&self) -> usize {
         self.queue_size.load(Ordering::Relaxed)
     }
 

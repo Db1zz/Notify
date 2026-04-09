@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
-use rdkafka::ClientConfig;
 use rdkafka::consumer::{Consumer, StreamConsumer};
+use rdkafka::ClientConfig;
 use scylla::client::session_builder::SessionBuilder;
-use tracing::{instrument, info};
+use tracing::{info, instrument};
 
 use crate::config::ConsumerConfig;
 use crate::consumer::KafkaNotificationStreamConsumer;
-use crate::manager::ClientsManager;
 use crate::manager::task_manager::TaskManager;
+use crate::manager::ClientsManager;
 use crate::repository::cassandra_repository::BlockedNotificationsCassandra;
 use crate::repository::cassandra_repository::NotificationsToSendCassandra;
 use crate::service::NotificationService;
@@ -23,23 +23,25 @@ pub async fn start(config: ConsumerConfig) {
         .set("group.id", "anteiku-consumer-group")
         .set("auto.offset.reset", "earliest");
 
-    let consumer: StreamConsumer = client_config 
-        .create()
-        .expect("Consumer creation failed");
+    let consumer: StreamConsumer = client_config.create().expect("Consumer creation failed");
 
     consumer
         .subscribe(&[&config.topic])
         .expect("Can't subscribe to specified topics");
 
-    consumer.fetch_metadata(Some(&config.topic), std::time::Duration::from_secs(3))
+    consumer
+        .fetch_metadata(Some(&config.topic), std::time::Duration::from_secs(3))
         .expect("failed to fetch kafka metadata");
 
     let repo_notifs_to_send_session = SessionBuilder::new()
         .known_node(config.notifications_to_send_database_addr)
         .build()
-        .await.unwrap();
+        .await
+        .unwrap();
 
-    let repo_notifs_to_send = Arc::new(NotificationsToSendCassandra::new(repo_notifs_to_send_session));
+    let repo_notifs_to_send = Arc::new(NotificationsToSendCassandra::new(
+        repo_notifs_to_send_session,
+    ));
 
     let repo_blocked_notifs_session = SessionBuilder::new()
         .known_node(config.blocked_notifications_database_addr)
@@ -47,7 +49,9 @@ pub async fn start(config: ConsumerConfig) {
         .await
         .unwrap();
 
-    let repo_blocked_notifs = Arc::new(BlockedNotificationsCassandra::new(repo_blocked_notifs_session));
+    let repo_blocked_notifs = Arc::new(BlockedNotificationsCassandra::new(
+        repo_blocked_notifs_session,
+    ));
 
     let kafka_stream_consumer = Arc::new(KafkaNotificationStreamConsumer::new(consumer));
 
@@ -61,13 +65,15 @@ pub async fn start(config: ConsumerConfig) {
         kafka_stream_consumer,
         clients_manager,
         task_manager,
-        config.metrics_receiver_addr);
-        
+        config.metrics_receiver_addr,
+    );
+
     info!("Service is successfully started!");
 
     notification_service.start().await;
 
-    tokio::signal::ctrl_c().await
+    tokio::signal::ctrl_c()
+        .await
         .expect("Failed to listen ctrl + c");
     info!("Shutdown signal received, waiting for workers to exit");
 }

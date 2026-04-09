@@ -1,6 +1,5 @@
 #[cfg(test)]
 mod tests {
-    use Notify::manager::ClientsManager;
     use serial_test::serial;
     use std::sync::Arc;
     use tokio::{
@@ -9,6 +8,7 @@ mod tests {
         time::{sleep, Duration, Instant},
     };
     use uuid::Uuid;
+    use Notify::manager::ClientsManager;
 
     async fn start_manager(addr: &str) -> Arc<ClientsManager> {
         let manager = Arc::new(ClientsManager::new(addr.to_string()).await);
@@ -134,51 +134,51 @@ mod tests {
         drop(stream);
     }
 
-	#[tokio::test]
-	async fn repeated_userid_is_an_error() {
-		use tokio::io::{AsyncReadExt, AsyncWriteExt};
-		use tokio::time::{timeout, Duration};
+    #[tokio::test]
+    async fn repeated_userid_is_an_error() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::time::{timeout, Duration};
 
-		let addr = "127.0.0.1:19100";
-		let manager = ClientsManager::new(addr.to_string()).await;
+        let addr = "127.0.0.1:19100";
+        let manager = ClientsManager::new(addr.to_string()).await;
 
-		let manager = Arc::new(manager);
-		let runner = manager.clone();
+        let manager = Arc::new(manager);
+        let runner = manager.clone();
 
-		tokio::spawn(async move {
-			runner.listen().await;
-		});
+        tokio::spawn(async move {
+            runner.listen().await;
+        });
 
-		tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-		let userid = Uuid::new_v4();
+        let userid = Uuid::new_v4();
 
-		let payload = serde_json::json!({ "userid": userid }).to_string();
+        let payload = serde_json::json!({ "userid": userid }).to_string();
 
-		let mut stream1 = TcpStream::connect(addr).await.unwrap();
-		stream1.write_all(payload.as_bytes()).await.unwrap();
+        let mut stream1 = TcpStream::connect(addr).await.unwrap();
+        stream1.write_all(payload.as_bytes()).await.unwrap();
 
-		tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-		assert!(
-			manager.get_client(userid).is_some(),
-			"first client not registered"
-		);
+        assert!(
+            manager.get_client(userid).is_some(),
+            "first client not registered"
+        );
 
-		let mut stream2 = TcpStream::connect(addr).await.unwrap();
-		stream2.write_all(payload.as_bytes()).await.unwrap();
+        let mut stream2 = TcpStream::connect(addr).await.unwrap();
+        stream2.write_all(payload.as_bytes()).await.unwrap();
 
-		let mut buf = [0u8; 1];
-		match timeout(Duration::from_secs(1), stream2.read(&mut buf)).await {
-			Ok(Ok(0)) => {}
-			Ok(Ok(n)) => panic!("expected second socket to be closed, got {n} bytes"),
-			Ok(Err(e)) => panic!("read error: {e}"),
-			Err(_) => panic!("server did not close second socket in time"),
-		}
+        let mut buf = [0u8; 1];
+        match timeout(Duration::from_secs(1), stream2.read(&mut buf)).await {
+            Ok(Ok(0)) => {}
+            Ok(Ok(n)) => panic!("expected second socket to be closed, got {n} bytes"),
+            Ok(Err(e)) => panic!("read error: {e}"),
+            Err(_) => panic!("server did not close second socket in time"),
+        }
 
-		assert_eq!(manager.get_clients_count(), 1);
+        assert_eq!(manager.get_clients_count(), 1);
 
-		drop(stream1);
-		drop(stream2);
-	}
+        drop(stream1);
+        drop(stream2);
+    }
 }

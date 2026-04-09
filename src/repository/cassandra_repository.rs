@@ -1,39 +1,43 @@
-use scylla::client::session::Session;
-use uuid::Uuid;
 use crate::error::database::EntityNotFoundError;
 use crate::models::notification::Notification;
 use crate::repository::repository::{Repository, RepositoryError};
 use async_trait::async_trait;
+use scylla::client::session::Session;
+use uuid::Uuid;
 
 pub struct NotificationsToSendCassandra {
-	session: Session
+    session: Session,
 }
 
 impl NotificationsToSendCassandra {
-	pub fn new(session: Session) -> Self {
-		Self { session }
-	}
+    pub fn new(session: Session) -> Self {
+        Self { session }
+    }
 }
 
 #[async_trait]
 impl Repository for NotificationsToSendCassandra {
-	type Item = Notification;
+    type Item = Notification;
 
-	async fn post(&self, notification: &Notification) -> Result<(), RepositoryError> {
-		let query = 
-			"INSERT INTO notify.notifs_to_send (userid, sourceid, type) VALUES (?, ?, ?)";
-		
-		self.session
-			.query_unpaged(
-				query,
-				(&notification.userid, &notification.sourceid, &notification.typ)
-			).await
-			.map_err(|e| RepositoryError::Other(e.into()))?;
-		Ok(())
-	}
+    async fn post(&self, notification: &Notification) -> Result<(), RepositoryError> {
+        let query = "INSERT INTO notify.notifs_to_send (userid, sourceid, type) VALUES (?, ?, ?)";
 
-	async fn get(&self, key: &Notification) -> Result<Notification, RepositoryError> {
-		let result: anyhow::Result<Notification> = async {
+        self.session
+            .query_unpaged(
+                query,
+                (
+                    &notification.userid,
+                    &notification.sourceid,
+                    &notification.typ,
+                ),
+            )
+            .await
+            .map_err(|e| RepositoryError::Other(e.into()))?;
+        Ok(())
+    }
+
+    async fn get(&self, key: &Notification) -> Result<Notification, RepositoryError> {
+        let result: anyhow::Result<Notification> = async {
 			let query = "SELECT userid, sourceid, type FROM notify.blocked_notifs WHERE userid = ? AND sourceid = ?";
 
 			let result = self.session
@@ -44,7 +48,7 @@ impl Repository for NotificationsToSendCassandra {
 				.await?;
 
 			let rows = result.into_rows_result()?;
-				
+
 			for row in rows.rows()? {
 				let (userid, sourceid, typ): (Uuid, Uuid, String) = row?;
 				return Ok(Notification::new(userid, sourceid, typ));
@@ -56,45 +60,47 @@ impl Repository for NotificationsToSendCassandra {
 			)
 		}.await;
 
-		match result {
-			Ok(v) => Ok(v),
-			Err(e) => {
-				if e.downcast_ref::<EntityNotFoundError>().is_some() {
-					Err(RepositoryError::NotFound(EntityNotFoundError { entity_id: (key.userid) }))
-				} else {
-					Err(RepositoryError::Other(e))
-				}
-			}
-		}
-	}
+        match result {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                if e.downcast_ref::<EntityNotFoundError>().is_some() {
+                    Err(RepositoryError::NotFound(EntityNotFoundError {
+                        entity_id: (key.userid),
+                    }))
+                } else {
+                    Err(RepositoryError::Other(e))
+                }
+            }
+        }
+    }
 }
 
 pub struct BlockedNotificationsCassandra {
-	session: Session
+    session: Session,
 }
 
 impl BlockedNotificationsCassandra {
-	pub fn new(session: Session) -> Self {
-		Self { session }
-	}
+    pub fn new(session: Session) -> Self {
+        Self { session }
+    }
 }
 
 #[async_trait]
 impl Repository for BlockedNotificationsCassandra {
-	type Item = Notification;
-	async fn post(&self, item: &Notification) -> Result<(), RepositoryError> {
-		let query = "INSERT INTO notify.blocked_notifs (userid, sourceid, type) VALUES (?, ?, ?)";
+    type Item = Notification;
+    async fn post(&self, item: &Notification) -> Result<(), RepositoryError> {
+        let query = "INSERT INTO notify.blocked_notifs (userid, sourceid, type) VALUES (?, ?, ?)";
 
-		self.session
-			.query_unpaged(query, (item.userid, item.sourceid, item.typ.clone()))
-			.await
-			.map_err(|e| RepositoryError::Other(e.into()))?;
+        self.session
+            .query_unpaged(query, (item.userid, item.sourceid, item.typ.clone()))
+            .await
+            .map_err(|e| RepositoryError::Other(e.into()))?;
 
-		Ok(())
-	}
+        Ok(())
+    }
 
-	async fn get(&self, key: &Notification) -> Result<Notification, RepositoryError> {
-		let result: anyhow::Result<Notification> = async {
+    async fn get(&self, key: &Notification) -> Result<Notification, RepositoryError> {
+        let result: anyhow::Result<Notification> = async {
 			let query = "SELECT userid, sourceid, type FROM notify.blocked_notifs WHERE userid = ? AND sourceid = ?";
 
 			let result = self.session
@@ -105,7 +111,7 @@ impl Repository for BlockedNotificationsCassandra {
 				.await?;
 
 			let rows = result.into_rows_result()?;
-				
+
 			for row in rows.rows()? {
 				let (userid, sourceid, typ): (Uuid, Uuid, String) = row?;
 				return Ok(Notification::new(userid, sourceid, typ));
@@ -117,17 +123,19 @@ impl Repository for BlockedNotificationsCassandra {
 			)
 		}.await;
 
-		match result {
-			Ok(v) => Ok(v),
-			Err(e) => {
-				if e.downcast_ref::<EntityNotFoundError>().is_some() {
-					Err(RepositoryError::NotFound(EntityNotFoundError { entity_id: (key.userid) }))
-				} else {
-					Err(RepositoryError::Other(e))
-				}
-			}
-		}
-	}
+        match result {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                if e.downcast_ref::<EntityNotFoundError>().is_some() {
+                    Err(RepositoryError::NotFound(EntityNotFoundError {
+                        entity_id: (key.userid),
+                    }))
+                } else {
+                    Err(RepositoryError::Other(e))
+                }
+            }
+        }
+    }
 }
 
 // #[derive(thiserror::Error, Debug)]
