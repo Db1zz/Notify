@@ -26,7 +26,7 @@ impl KafkaNotificationStreamConsumer {
         debug!(payload = payload, "Message payload");
 
         let notification =
-            serde_json::from_str::<Notification>(payload).map_err(|e| ParseError::Parse(e))?;
+            serde_json::from_str::<Notification>(payload).map_err(ParseError::Parse)?;
 
         Ok(notification)
     }

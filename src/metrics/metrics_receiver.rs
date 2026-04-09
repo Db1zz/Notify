@@ -129,10 +129,10 @@ impl MetricsReceiver {
 
         match result {
             Some(node) => {
-                return Ok(node.key().clone());
+                Ok(node.key().clone())
             }
             None => {
-                return Err(MetricsReceiverError::NoSenders);
+                Err(MetricsReceiverError::NoSenders)
             }
         }
     }

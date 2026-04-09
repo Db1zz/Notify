@@ -31,7 +31,7 @@ impl TaskManagerTask for LoadBalancerTask {
                     .writer
                     .lock()
                     .await
-                    .write_all(&addr.to_string().to_bytes())
+                    .write_all(addr.to_string().to_bytes())
                     .await;
             }
             Err(e) => {

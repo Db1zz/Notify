@@ -12,7 +12,7 @@ impl MetricsSender {
     pub fn new(receiver_addr: String) -> Self {
         Self {
             stream: None,
-            receiver_addr: receiver_addr,
+            receiver_addr,
         }
     }
 
@@ -25,9 +25,9 @@ impl MetricsSender {
         let json_msg = serde_json::to_string(&msg)? + "\n";
 
         stream
-            .write_all(&json_msg.to_bytes())
+            .write_all(json_msg.to_bytes())
             .await
-            .map_err(|e| MetricsSenderError::Io(e))?;
+            .map_err(MetricsSenderError::Io)?;
 
         Ok(())
     }

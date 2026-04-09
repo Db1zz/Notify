@@ -11,7 +11,7 @@ use crate::manager::ClientsManager;
 use crate::metrics::metrics_sender::MetricsSender;
 use crate::metrics::{LoadMetrics, Message, Metrics, NodeRole, Register};
 use crate::models::notification::Notification;
-use crate::repository::repository::{Repository, RepositoryError};
+use crate::repository::types::{Repository, RepositoryError};
 
 pub struct NotificationServiceTask<NotifsToSendRepo, BlockedNotifsRepo> {
     notification: Notification,

@@ -34,7 +34,7 @@ impl ClientsManager {
         Self {
             listener: Arc::new(TcpListener::bind(addr.clone()).await.unwrap()),
             connected_clients: Arc::new(DashMap::new()),
-            addr: addr,
+            addr
         }
     }
 
@@ -52,7 +52,7 @@ impl ClientsManager {
             return Err(ConnectionError::AlreadyConnected(connection_data.userid));
         }
 
-        connected_clients.insert(connection_data.userid.clone(), Arc::new(Mutex::new(writer)));
+        connected_clients.insert(connection_data.userid, Arc::new(Mutex::new(writer)));
 
         Ok(ConnectedClient {
             userid: connection_data.userid,
@@ -134,7 +134,7 @@ impl ClientsManager {
     }
 
     pub fn get_addr(&self) -> &String {
-        return &self.addr;
+        &self.addr
     }
 }
 

@@ -1,4 +1,4 @@
-pub use config::{Config, ConsumerConfig, LoadBalancerConfig, ProducerConfig};
+pub use types::{Config, ConsumerConfig, LoadBalancerConfig, ProducerConfig};
 
-pub mod config;
+pub mod types;
 pub mod parser;

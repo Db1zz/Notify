@@ -1,6 +1,6 @@
 use crate::error::database::EntityNotFoundError;
 use crate::models::notification::Notification;
-use crate::repository::repository::{Repository, RepositoryError};
+use crate::repository::types::{Repository, RepositoryError};
 use async_trait::async_trait;
 use scylla::client::session::Session;
 use uuid::Uuid;
@@ -49,7 +49,7 @@ impl Repository for NotificationsToSendCassandra {
 
 			let rows = result.into_rows_result()?;
 
-			for row in rows.rows()? {
+			if let Some(row) = rows.rows()?.next() {
 				let (userid, sourceid, typ): (Uuid, Uuid, String) = row?;
 				return Ok(Notification::new(userid, sourceid, typ));
 			}
@@ -112,7 +112,7 @@ impl Repository for BlockedNotificationsCassandra {
 
 			let rows = result.into_rows_result()?;
 
-			for row in rows.rows()? {
+			if let Some(row) = rows.rows()?.next() {
 				let (userid, sourceid, typ): (Uuid, Uuid, String) = row?;
 				return Ok(Notification::new(userid, sourceid, typ));
 			}

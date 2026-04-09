@@ -5,7 +5,6 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    usize,
 };
 use tokio::sync::Mutex;
 use tracing::{error, instrument};
@@ -74,7 +73,7 @@ where
     }
 
     pub fn start(&mut self) {
-        if self.is_started == true {
+        if self.is_started {
             return;
         }
 

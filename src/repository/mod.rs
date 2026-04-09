@@ -1,2 +1,2 @@
 pub mod cassandra_repository;
-pub mod repository;
+pub mod types;
