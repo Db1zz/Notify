@@ -124,3 +124,6 @@ cargo run -- load-balancer
 **8989** — load balancer
 
 **8992** — producer
+
+## TODO List
+- Authentication
