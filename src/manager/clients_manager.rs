@@ -89,6 +89,7 @@ impl ClientsManager {
 			let (socket, client_addr) = self.listener.accept().await.unwrap();
 			let cloned_connected_clients = self.connected_clients.clone();
 
+			// Note: info span for logs is too heavy, and shouldn't be created for each connection...
 			tokio::spawn(async move {
 				let (reader, writer) = socket.into_split();
 				let result = Self::connect_client_task(cloned_connected_clients.clone(), reader, writer).await;
