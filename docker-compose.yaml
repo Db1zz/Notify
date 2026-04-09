@@ -25,7 +25,7 @@ services:
     image: cassandra:latest
     depends_on:
       - cassandra
-    restart: no
+    restart: "no"
     entrypoint: ["/bin/bash", "/cassandra/init.sh"]
     volumes:
       - ./cassandra:/cassandra
