@@ -103,3 +103,7 @@ cargo run -- load-balancer
 
 ## TODO List
 - Authentication
+
+## License
+
+Notify is licensed under the GNU GPL v3.0, see LICENSE
