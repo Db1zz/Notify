@@ -13,11 +13,11 @@ use tokio::{
     time::{sleep, timeout},
 };
 use uuid::Uuid;
-use Notify::{
+use notify::{
     app,
     config::ConsumerConfig,
     models::notification::Notification,
-    repository::{cassandra_repository::BlockedNotificationsCassandra, repository::Repository},
+    repository::{cassandra_repository::BlockedNotificationsCassandra, types::Repository},
 };
 
 use crate::utils::start_docker_compose;

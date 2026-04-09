@@ -37,7 +37,7 @@ fn get_config_string(path: Option<String>) -> String {
         None => "./config.yaml".to_owned(),
     };
 
-    let config_raw_data = match fs::read_to_string(config_path.clone()) {
+    match fs::read_to_string(config_path.clone()) {
         Ok(data) => data,
         Err(e) => {
             error!(
@@ -47,9 +47,7 @@ fn get_config_string(path: Option<String>) -> String {
             );
             panic!();
         }
-    };
-
-    config_raw_data
+    }
 }
 
 #[tokio::main]

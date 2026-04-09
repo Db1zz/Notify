@@ -2,7 +2,7 @@ use serial_test::serial;
 use std::time::Duration;
 
 use tokio::task::JoinHandle;
-use Notify::{app::consumer, config::ConsumerConfig};
+use notify::{app::consumer, config::ConsumerConfig};
 
 use crate::utils::start_docker_compose;
 

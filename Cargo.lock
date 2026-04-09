@@ -3,31 +3,6 @@
 version = 4
 
 [[package]]
-name = "Notify"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "clap",
- "crossbeam-deque",
- "dashmap",
- "futures",
- "log",
- "once_cell",
- "rdkafka",
- "scylla",
- "serde",
- "serde_json",
- "serde_yaml",
- "serial_test",
- "thiserror",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
 name = "allocator-api2"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -643,6 +618,31 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "notify"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "clap",
+ "crossbeam-deque",
+ "dashmap",
+ "futures",
+ "log",
+ "once_cell",
+ "rdkafka",
+ "scylla",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "serial_test",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

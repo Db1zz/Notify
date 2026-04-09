@@ -1,10 +1,10 @@
 use scylla::client::session_builder::SessionBuilder;
 use uuid::Uuid;
-use Notify::{
+use notify::{
     models::notification::Notification,
     repository::{
         cassandra_repository::{BlockedNotificationsCassandra, NotificationsToSendCassandra},
-        repository::Repository,
+        types::Repository,
     },
 };
 
