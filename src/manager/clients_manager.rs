@@ -3,6 +3,7 @@ use std::sync::Arc;
 use dashmap::DashMap;
 use serde::Deserialize;
 use tokio::{io::AsyncReadExt, net::{TcpListener, tcp::{OwnedReadHalf, OwnedWriteHalf}}, sync::Mutex};
+use tracing::{instrument, warn, error, info};
 use uuid::Uuid;
 
 #[derive(Deserialize)]
@@ -52,6 +53,7 @@ impl ClientsManager {
 		})
 	}
 
+	#[instrument(skip(connected_clients, client))]
 	async fn watch_client_disconnect(
 		connected_clients: Arc<DashMap<Uuid, Arc<Mutex<OwnedWriteHalf>>>>,
 		mut client: ConnectedClient)
@@ -61,22 +63,27 @@ impl ClientsManager {
 		loop {
 			match client.reader.read(&mut buf).await {
 				Ok(0) => {
-					println!("A client has been disconnected");
+					info!(
+						userid = client.userid.to_string(), // Tbh casting UUID to a string is kinda inefficient in a loaded system... TODO
+						"A user has been disconnected");
 					break;
 				}
 				Ok(_) => continue,
-				Err(err) => {
-					println!("error: {err}");
+				Err(e) => {
+					error!(error = ?e, "TCP read() error");
                 	break;
 				}
 			}
 		}
 
 		if connected_clients.remove(&client.userid).is_none() {
-			// TODO
+			error!(
+				userid = client.userid.to_string(),
+				"Client doesn't exists in a dashmap, if you see this message, it means there's a BUG...")
 		}
 	}
 
+	#[instrument(skip(self))]
 	pub async fn listen(&self) {
 		loop {
 			let (socket, client_addr) = self.listener.accept().await.unwrap();
@@ -87,11 +94,11 @@ impl ClientsManager {
 				let result = Self::connect_client_task(cloned_connected_clients.clone(), reader, writer).await;
 				match result {
 					Ok(client) => {
-						println!("A new client connected to the server {}", client_addr);
+						info!(cl_addr = client_addr.to_string(), "A new client connected to the server");
 						Self::watch_client_disconnect(cloned_connected_clients, client).await;
 					}
-					Err(err) => {
-						eprintln!("Failed to establish connection with a client: {}", err);
+					Err(e) => {
+						warn!(error = ?e, "Failed to establish connection with a client");
 					}
 				}
 			});
