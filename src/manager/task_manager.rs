@@ -2,6 +2,7 @@ use std::{sync::{Arc, atomic::{AtomicBool, Ordering}}, usize};
 use async_trait::async_trait;
 use futures::{SinkExt, channel::mpsc};
 use tokio::sync::Mutex;
+use tracing::{instrument, error};
 
 pub struct TaskManager<Task: TaskManagerTask> {
 	max_workers: usize,
@@ -31,6 +32,7 @@ where
 		}
 	}
 
+	#[instrument(skip(is_exiting, receiver))]
 	async fn worker_routine(is_exiting: Arc<AtomicBool>, receiver: Arc<Mutex<mpsc::Receiver<Task>>>) {
 		loop {
 			// Not sure if relaxed check is valid here: https://assets.bitbashing.io/papers/concurrency-primer.pdf
@@ -43,8 +45,9 @@ where
 					task.handle().await;
 				},
 				Err(e) => {
-					// TODO: shall we handle it somehow? How recv() can fail? study ittttt
-					println!("Recv() Error: {:?}", e);
+					// recv() can fail only if all senders are dropped, therefore better to throw an error and exit
+					error!(error = ?e, "recv() error");
+					break;
 				}
 			}
 		}
@@ -69,9 +72,11 @@ where
 		self.spawn_workers();
 	}
 
+	#[instrument(skip(self, task))]
 	pub async fn submit(&mut self, task: Task) {
 		if let Err(e) = self.sender.send(task).await {
-			panic!("{:?}", e); // I'm not sure, if panic is the best choice here.
+			error!(error = %e, "send() failed");
+			panic!();
 		}
 	}
 }
