@@ -13,6 +13,7 @@ use core::panic;
 use std::fs;
 
 use clap::{Parser, Subcommand};
+use tracing::{instrument, error};
 use crate::config::parser;
 
 #[derive(Parser)]
@@ -29,6 +30,7 @@ enum Service {
     LoadBalancer
 }
 
+#[instrument(skip(path))]
 fn get_config_string(path: Option<String>) -> String {
     let config_path = match path {
         Some(path) => path,
@@ -38,7 +40,12 @@ fn get_config_string(path: Option<String>) -> String {
     let config_raw_data = match fs::read_to_string(config_path.clone()) {
         Ok(data) => data,
         Err(e) => {
-            panic!("Error: Unable to read '{}' file\nReason: {}", config_path, e);
+            error!(
+                error = ?e,
+                config_path = ?config_path,
+                "Unable to read a conifg file"
+            );
+            panic!();
         }
     };
 
@@ -46,25 +53,26 @@ fn get_config_string(path: Option<String>) -> String {
 }
 
 #[tokio::main]
+#[instrument()]
 async fn main() {
-    // Get config path from a CLI or use default path...
-    let config_raw_data = get_config_string(None);
-    let result = parser::parse(config_raw_data);
-    let config = match result {
-        Ok(c) => c,
-        Err(e) => {
-            panic!("Failed to parse config {}", e);
-        }
-    };
-
-    let cli = Cli::parse();
-
     tracing_subscriber::fmt()
             .with_target(true) // - shows which module/service the log came from
             .with_thread_ids(true)
             .with_level(true)
             .init();
 
+    // Get config path from a CLI or use default path...
+    let config_raw_data = get_config_string(None);
+    let result = parser::parse(config_raw_data);
+    let config = match result {
+        Ok(c) => c,
+        Err(e) => {
+            error!(error = ?e, "Failed to parse config");
+            panic!();
+        }
+    };
+
+    let cli = Cli::parse();
     match cli.command {
         Service::Consumer => {
             app::consumer::start(config.consumer.unwrap()).await;
