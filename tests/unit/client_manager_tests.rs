@@ -1,14 +1,15 @@
 #[cfg(test)]
 mod tests {
+    use futures::{SinkExt, StreamExt};
     use notify::manager::ClientsManager;
     use serial_test::serial;
     use std::sync::Arc;
-    use tokio::{
-        io::AsyncWriteExt,
-        net::TcpStream,
-        time::{sleep, Duration, Instant},
-    };
+    use tokio::time::{sleep, timeout, Duration, Instant};
+    use tokio_tungstenite::tungstenite::Message;
+
     use uuid::Uuid;
+
+    use crate::utils::{connect_to_manager, register_client};
 
     async fn start_manager(addr: &str) -> Arc<ClientsManager> {
         let manager = Arc::new(ClientsManager::new(addr.to_string()).await);
@@ -22,16 +23,6 @@ mod tests {
         manager
     }
 
-    async fn register_client(addr: &str, userid: Uuid) -> TcpStream {
-        let mut stream = TcpStream::connect(addr).await.unwrap();
-        let payload = serde_json::json!({ "userid": userid }).to_string();
-
-        stream.write_all(payload.as_bytes()).await.unwrap();
-        stream.flush().await.unwrap();
-
-        stream
-    }
-
     async fn wait_for_state(
         manager: &Arc<ClientsManager>,
         userid: Uuid,
@@ -41,7 +32,10 @@ mod tests {
         let deadline = Instant::now() + timeout_dur;
 
         loop {
-            let is_present = manager.get_client(userid).is_some();
+            let result = manager.send_to_client(userid, "zxc".to_owned()).await;
+
+            let is_present = result.is_ok();
+
             if is_present == expected_present {
                 return true;
             }
@@ -68,7 +62,7 @@ mod tests {
             "client should appear in DashMap"
         );
 
-        assert!(manager.get_client(userid).is_some());
+        assert!(manager.is_client_connected(userid).await);
 
         drop(stream);
     }
@@ -101,9 +95,11 @@ mod tests {
         let addr = "127.0.0.1:19081";
         let manager = start_manager(addr).await;
 
-        let mut stream = TcpStream::connect(addr).await.unwrap();
-        stream.write_all(b"{not valid json").await.unwrap();
-        stream.flush().await.unwrap();
+        let mut ws_stream = connect_to_manager(addr).await;
+        let msg = Message::from("zxc");
+        if let Err(e) = ws_stream.send(msg).await {
+            panic!("Test error: {:?}", e);
+        }
 
         sleep(Duration::from_millis(200)).await;
 
@@ -136,9 +132,6 @@ mod tests {
 
     #[tokio::test]
     async fn repeated_userid_is_an_error() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        use tokio::time::{timeout, Duration};
-
         let addr = "127.0.0.1:19100";
         let manager = ClientsManager::new(addr.to_string()).await;
 
@@ -154,28 +147,32 @@ mod tests {
         let userid = Uuid::new_v4();
 
         let payload = serde_json::json!({ "userid": userid }).to_string();
+        let msg = Message::from(payload);
 
-        let mut stream1 = TcpStream::connect(addr).await.unwrap();
-        stream1.write_all(payload.as_bytes()).await.unwrap();
+        let mut stream1 = connect_to_manager(addr).await;
+        stream1.send(msg.clone()).await.unwrap();
 
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         assert!(
-            manager.get_client(userid).is_some(),
+            manager.is_client_connected(userid).await,
             "first client not registered"
         );
 
-        let mut stream2 = TcpStream::connect(addr).await.unwrap();
-        stream2.write_all(payload.as_bytes()).await.unwrap();
+        let mut stream2 = connect_to_manager(addr).await;
+        stream2.send(msg).await.unwrap();
 
-        let mut buf = [0u8; 1];
-        match timeout(Duration::from_secs(1), stream2.read(&mut buf)).await {
-            Ok(Ok(0)) => {}
-            Ok(Ok(n)) => panic!("expected second socket to be closed, got {n} bytes"),
-            Ok(Err(e)) => panic!("read error: {e}"),
-            Err(_) => panic!("server did not close second socket in time"),
+        match timeout(Duration::from_secs(1), stream2.next()).await {
+            Ok(Some(result)) => match result {
+                Ok(Message::Close(_)) => {}
+                Ok(other) => panic!("Expected close frame, but got: {:?}", other),
+                Err(e) => {
+                    println!("Got expected error/close: {}", e);
+                }
+            },
+            Ok(None) => {}
+            Err(_) => panic!("Server did not close second socket in time (timeout)"),
         }
-
         assert_eq!(manager.get_clients_count(), 1);
 
         drop(stream1);

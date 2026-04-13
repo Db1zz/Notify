@@ -1,26 +1,23 @@
 use std::{time::Duration, vec};
 
+use futures::StreamExt;
 use notify::{
-    app,
+    app::{self},
     config::ConsumerConfig,
     models::notification::Notification,
     repository::{cassandra_repository::BlockedNotificationsCassandra, types::Repository},
 };
 use rdkafka::{
-    message::ToBytes,
     producer::{FutureProducer, FutureRecord},
     ClientConfig,
 };
 use scylla::client::session_builder::SessionBuilder;
 use serial_test::serial;
-use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    net::TcpStream,
-    time::{sleep, timeout},
-};
+use tokio::time::{sleep, timeout};
+use tokio_tungstenite::connect_async;
 use uuid::Uuid;
 
-use crate::utils::start_docker_compose;
+use crate::utils::{register_client, start_docker_compose};
 
 async fn produce_stream_data(
     brokers: String,
@@ -52,38 +49,55 @@ async fn produce_stream_data(
     }
 }
 
-async fn wait_for_consumer_to_up(addr: &str) {
+async fn wait_for_consumer_to_up(raw_consumer_addr: &str) {
+    let ws_addr = "ws://".to_owned() + raw_consumer_addr;
+    let mut ready = false;
     for _ in 0..30 {
-        let stream = TcpStream::connect(addr).await;
-        if stream.is_ok() {
-            println!("test addr: {}", stream.unwrap().local_addr().unwrap());
-            return;
+        if connect_async(&ws_addr).await.is_ok() {
+            ready = true;
+            break;
         }
         sleep(Duration::from_secs(1)).await;
-        println!("Trying to connect to the host: {}", addr);
     }
-    println!("Consumer is up!");
+
+    if ready {
+        sleep(Duration::from_millis(500)).await;
+        println!("Consumer port is open and stabilized!");
+    } else {
+        panic!("Consumer never started!");
+    }
 }
 
 async fn run_client(consumer_addr: String, client_id: Uuid) {
-    let mut stream = TcpStream::connect(consumer_addr).await.unwrap();
-    let register_msg = format!(r#"{{"userid":"{}"}}"#, client_id) + "\n";
-    let _ = stream.write(register_msg.to_bytes()).await;
+    let mut client = register_client(&consumer_addr, client_id).await;
 
-    let mut reader = BufReader::new(stream);
-    let mut buf = String::new();
+    println!("Client {}: trying to receive a notification...", client_id);
 
-    println!("trying to receive a notification...");
-    match timeout(Duration::from_secs(5), reader.read_line(&mut buf)).await {
-        Ok(bytes) => {
-            if bytes.unwrap() == 0 {
-                panic!("Consumer closed his connection with the client");
+    let msg_result = match timeout(Duration::from_secs(10), client.next()).await {
+        Ok(Some(res)) => res,
+        Ok(None) => panic!(
+            "Client {}: Consumer closed connection (Stream ended)",
+            client_id
+        ),
+        Err(_) => panic!(
+            "Client {}: Failed to receive notification, timeouted!",
+            client_id
+        ),
+    };
+
+    match msg_result {
+        Ok(msg) => {
+            if msg.is_text() || msg.is_binary() {
+                println!("Client {}: Notification received: {}", client_id, msg);
+            } else if msg.is_close() {
+                panic!(
+                    "Client {}: Consumer closed connection via Close frame",
+                    client_id
+                );
             }
         }
-        Err(_) => panic!("Failed to receive a user notification, timeouted!"),
+        Err(e) => panic!("Client {}: WebSocket error: {:?}", client_id, e),
     }
-
-    println!("Notification: {}", buf);
 }
 
 #[tokio::test]
@@ -116,6 +130,8 @@ pub async fn test_consumer_notification_delivery_to_a_single_client() {
     let client_handle = tokio::spawn(async move {
         run_client(consumer_addr, clientid).await;
     });
+
+    sleep(Duration::from_secs(2)).await;
 
     produce_stream_data(brokers, topic, &vec![clientid], sourceid).await;
 

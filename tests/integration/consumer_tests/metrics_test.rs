@@ -33,7 +33,7 @@ async fn test_metrics_sender_reconnection() {
     });
 
     time::sleep(Duration::from_secs(5)).await;
-    let node = receiver.get_least_loaded_consumer_node().await.unwrap();
+    let node: String = receiver.get_least_loaded_consumer_node().await.unwrap();
     assert!(!node.is_empty());
 
     time::sleep(Duration::from_secs(6)).await;

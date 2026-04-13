@@ -9,15 +9,11 @@ use crate::utils::start_docker_compose;
 async fn catch_panic_or_timeout(timeout: Duration, handle: JoinHandle<()>) {
     match tokio::time::timeout(timeout, handle).await {
         Ok(join_result) => match join_result {
-            Ok(_) => {
-                return;
-            }
+            Ok(_) => {}
             Err(err) if err.is_panic() => {
                 panic!()
             }
-            Err(_err) => {
-                return;
-            }
+            Err(_err) => {}
         },
         Err(_) => {
             println!("Timeout reached!");

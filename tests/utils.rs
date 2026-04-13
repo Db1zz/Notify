@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 use std::process::Stdio;
 use std::time::Duration;
 
+use futures::SinkExt;
 use scylla::client::session_builder::SessionBuilder;
 use tokio::{
     net::TcpStream,
@@ -9,6 +10,8 @@ use tokio::{
     sync::OnceCell,
     time::{sleep, timeout, Instant},
 };
+use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
+use uuid::Uuid;
 
 static DOCKER_COMPOSE: OnceCell<()> = OnceCell::const_new();
 
@@ -61,4 +64,27 @@ async fn wait_for_cassandra(addr: &str) {
     }
 
     panic!("Cassandra did not start");
+}
+
+pub async fn connect_to_manager(addr: &str) -> WebSocketStream<MaybeTlsStream<TcpStream>> {
+    let protocol = "ws://".to_owned();
+    let client_addr = protocol + addr;
+
+    let (ws_stream, _) = connect_async(client_addr).await.expect("Failed to connect");
+
+    ws_stream
+}
+
+pub async fn register_client(
+    addr: &str,
+    userid: Uuid,
+) -> WebSocketStream<MaybeTlsStream<TcpStream>> {
+    let mut ws_stream = connect_to_manager(addr).await;
+    let payload = serde_json::json!({ "userid": userid }).to_string();
+    let message = Message::from(payload);
+
+    match ws_stream.send(message).await {
+        Ok(_) => ws_stream,
+        Err(e) => panic!("Failed to register a user {:?}", e),
+    }
 }

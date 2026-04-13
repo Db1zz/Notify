@@ -1,7 +1,6 @@
 use async_trait::async_trait;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::io::AsyncWriteExt;
 use tokio::time::sleep;
 use tracing::{debug, error, info, instrument, warn, Instrument};
 
@@ -48,21 +47,17 @@ where
 		fields(userid = %notification.userid)
 	)]
     async fn send_notification(&self, notification: &Notification) -> bool {
-        match self.clients_manager.get_client(notification.userid) {
-            Some(client) => {
-                let mut writer = client.lock().await;
-                if let Err(e) = writer
-                    .write_all((notification.sourceid.to_string() + "\n").as_bytes())
-                    .await
-                {
-                    error!("Failed to write to client: {:?}", e);
-                    return false;
-                }
+        match self
+            .clients_manager
+            .send_to_client(notification.userid, notification.sourceid.to_string())
+            .await
+        {
+            Ok(_) => {
                 debug!(source_id = %notification.sourceid, "Notification sent successfully");
                 return true;
             }
-            None => {
-                warn!("Client not found in manager");
+            Err(e) => {
+                error!("Failed to write to client: {:?}", e);
                 return false;
             }
         }
