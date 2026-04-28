@@ -1,11 +1,15 @@
+pub mod api;
 pub mod config;
 pub mod consumer;
+pub mod entity;
 pub mod error;
 pub mod manager;
 pub mod metrics;
 pub mod models;
 pub mod repository;
+pub mod security;
 pub mod service;
+pub mod utility;
 
 mod app;
 
@@ -50,6 +54,15 @@ fn get_config_string(path: Option<String>) -> String {
     }
 }
 
+fn get_jwt_secret() -> String {
+    let r = match std::env::var("JWT_SECRET") {
+        Ok(s) => s,
+        Err(_) => panic!("Environment variable JWT_SECRET not found!"),
+    };
+
+    r
+}
+
 #[tokio::main]
 #[instrument()]
 async fn main() {
@@ -58,6 +71,8 @@ async fn main() {
         .with_thread_ids(true)
         .with_level(true)
         .init();
+
+    dotenvy::dotenv().ok(); // Load .env files
 
     // Get config path from a CLI or use default path...
     let config_raw_data = get_config_string(None);
@@ -73,7 +88,7 @@ async fn main() {
     let cli = Cli::parse();
     match cli.command {
         Service::Consumer => {
-            app::consumer::start(config.consumer.unwrap()).await;
+            app::consumer::start(config.consumer.unwrap(), get_jwt_secret()).await;
         }
 
         Service::Producer => {

@@ -10,8 +10,8 @@ pub struct Config {
 pub struct ConsumerConfig {
     pub topic: String,
     pub brokers: String,
-    pub notifications_to_send_database_addr: String,
-    pub blocked_notifications_database_addr: String,
+    pub user_notifications_database_addr: String,
+    pub notification_preferences_database_addr: String,
     pub clients_node_addr: String,
     pub metrics_receiver_addr: String,
 }

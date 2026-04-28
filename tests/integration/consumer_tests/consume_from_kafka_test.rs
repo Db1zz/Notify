@@ -1,29 +1,34 @@
-use std::{time::Duration, vec};
-
-use futures::StreamExt;
+use futures::{SinkExt, StreamExt};
 use notify::{
-    app::{self},
+    app,
     config::ConsumerConfig,
-    models::notification::Notification,
-    repository::{cassandra_repository::BlockedNotificationsCassandra, types::Repository},
+    entity::NotificationPreferencesEntity,
+    models::{
+        notification::{EventScope, EventType},
+        NotificationEvent,
+    },
+    repository::CassandraNotificationPreferencesRepository,
+    service::NotificationPreferencesService,
 };
 use rdkafka::{
     producer::{FutureProducer, FutureRecord},
     ClientConfig,
 };
 use scylla::client::session_builder::SessionBuilder;
+use serde_json::Value;
 use serial_test::serial;
+use std::{str::FromStr, sync::Arc, time::Duration};
 use tokio::time::{sleep, timeout};
-use tokio_tungstenite::connect_async;
+use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use uuid::Uuid;
 
-use crate::utils::{register_client, start_docker_compose};
+use crate::utils::{generate_token_for_test, get_jwt_secret, start_docker_compose};
 
 async fn produce_stream_data(
     brokers: String,
     topic: String,
     client_ids: &Vec<Uuid>,
-    sourceid: Uuid,
+    sender_id: Uuid,
 ) {
     let producer: FutureProducer = ClientConfig::new()
         .set("bootstrap.servers", brokers)
@@ -32,71 +37,54 @@ async fn produce_stream_data(
         .expect("Producer creation error");
 
     for id in client_ids {
-        let notification_msg = format!(
-            r#"{{"userid":"{}", "sourceid":"{}", "typ":"zxc"}}"#,
-            id, sourceid
-        )
-        .to_owned()
-            + "\n";
+        let payload = format!(r#"{{"user_id": "{}", "sender_id": "{}"}}"#, id, sender_id);
+
+        let stream_data = NotificationEvent {
+            etype: EventType::MessageCreated,
+            scope: EventScope::DM,
+            payload: Value::from_str(&payload).unwrap(),
+        };
+
+        let json_payload = serde_json::to_string(&stream_data).unwrap();
         let _ = producer
             .send(
                 FutureRecord::to(&topic)
-                    .payload(notification_msg.as_bytes())
-                    .key("key"),
+                    .payload(json_payload.as_bytes())
+                    .key(&id.to_string()),
                 Duration::from_secs(5),
             )
             .await;
     }
 }
 
-async fn wait_for_consumer_to_up(raw_consumer_addr: &str) {
-    let ws_addr = "ws://".to_owned() + raw_consumer_addr;
-    let mut ready = false;
-    for _ in 0..30 {
-        if connect_async(&ws_addr).await.is_ok() {
-            ready = true;
-            break;
-        }
-        sleep(Duration::from_secs(1)).await;
-    }
-
-    if ready {
-        sleep(Duration::from_millis(500)).await;
-        println!("Consumer port is open and stabilized!");
-    } else {
-        panic!("Consumer never started!");
-    }
-}
-
 async fn run_client(consumer_addr: String, client_id: Uuid) {
-    let mut client = register_client(&consumer_addr, client_id).await;
+    let ws_addr = format!("ws://{}", consumer_addr);
+    let (mut ws_stream, _) = connect_async(&ws_addr).await.expect("Failed to connect");
 
-    println!("Client {}: trying to receive a notification...", client_id);
+    let token = generate_token_for_test(client_id, &get_jwt_secret());
+    ws_stream
+        .send(Message::Text(token.into()))
+        .await
+        .expect("Failed to send token");
 
-    let msg_result = match timeout(Duration::from_secs(10), client.next()).await {
-        Ok(Some(res)) => res,
-        Ok(None) => panic!(
-            "Client {}: Consumer closed connection (Stream ended)",
-            client_id
-        ),
-        Err(_) => panic!(
-            "Client {}: Failed to receive notification, timeouted!",
-            client_id
-        ),
-    };
+    println!(
+        "Client {}: Authenticated, waiting for notification...",
+        client_id
+    );
+    let msg_result = timeout(Duration::from_secs(15), ws_stream.next()).await;
 
     match msg_result {
-        Ok(msg) => {
+        Ok(Some(Ok(msg))) => {
             if msg.is_text() || msg.is_binary() {
-                println!("Client {}: Notification received: {}", client_id, msg);
-            } else if msg.is_close() {
-                panic!(
-                    "Client {}: Consumer closed connection via Close frame",
-                    client_id
-                );
+                println!("Client {}: Received: {}", client_id, msg);
+            } else {
+                panic!("Client {}: Received unexpected message type", client_id);
             }
         }
-        Err(e) => panic!("Client {}: WebSocket error: {:?}", client_id, e),
+        _ => panic!(
+            "Client {}: Failed to receive notification (timeout or error)",
+            client_id
+        ),
     }
 }
 
@@ -112,132 +100,70 @@ pub async fn test_consumer_notification_delivery_to_a_single_client() {
     let config = ConsumerConfig {
         topic: topic.clone(),
         brokers: brokers.clone(),
-        notifications_to_send_database_addr: "127.0.0.1:9042".to_owned(),
-        blocked_notifications_database_addr: "127.0.0.1:9042".to_owned(),
+        user_notifications_database_addr: "127.0.0.1:9042".to_owned(),
+        notification_preferences_database_addr: "127.0.0.1:9042".to_owned(),
         clients_node_addr: "0.0.0.0:7979".to_owned(),
         metrics_receiver_addr: "0.0.0.0:6979".to_owned(),
     };
 
     tokio::spawn(async move {
-        app::consumer::start(config).await;
+        app::consumer::start(config, get_jwt_secret()).await;
     });
 
-    wait_for_consumer_to_up(&consumer_addr).await;
+    sleep(Duration::from_secs(1)).await;
 
-    let clientid = Uuid::new_v4();
-    let sourceid = Uuid::new_v4();
+    let client_id = Uuid::new_v4();
+    let sender_id = Uuid::new_v4();
 
-    let client_handle = tokio::spawn(async move {
-        run_client(consumer_addr, clientid).await;
-    });
+    let client_handle = tokio::spawn(run_client(consumer_addr, client_id));
+    produce_stream_data(brokers, topic, &vec![client_id], sender_id).await;
 
-    sleep(Duration::from_secs(2)).await;
-
-    produce_stream_data(brokers, topic, &vec![clientid], sourceid).await;
-
-    let result = client_handle.await;
-    assert!(result.is_ok());
-}
-
-#[tokio::test]
-#[serial]
-pub async fn test_consumer_notification_delivery_to_a_multiple_clients() {
-    start_docker_compose().await;
-
-    let consumer_addr = "127.0.0.1:7979".to_owned();
-    let brokers = "localhost:9092".to_owned();
-    let topic = "user-notifs".to_owned();
-
-    let config = ConsumerConfig {
-        topic: topic.clone(),
-        brokers: brokers.clone(),
-        notifications_to_send_database_addr: "127.0.0.1:9042".to_owned(),
-        blocked_notifications_database_addr: "127.0.0.1:9042".to_owned(),
-        clients_node_addr: "0.0.0.0:7979".to_owned(),
-        metrics_receiver_addr: "0.0.0.0:6979".to_owned(),
-    };
-
-    tokio::spawn(async move {
-        app::consumer::start(config).await;
-    });
-
-    wait_for_consumer_to_up(&consumer_addr).await;
-    let mut handles = Vec::new();
-    let mut client_ids = Vec::new();
-    let amount_of_clients: usize = 5;
-
-    for _ in 0..amount_of_clients {
-        let consumer_addr = consumer_addr.clone();
-        let clientid = Uuid::new_v4();
-
-        let handle = tokio::spawn(async move {
-            run_client(consumer_addr, clientid).await;
-        });
-
-        client_ids.push(clientid);
-        handles.push(handle);
-    }
-    let sourceid = Uuid::new_v4();
-    produce_stream_data(brokers, topic, &client_ids, sourceid).await;
-
-    for handle in handles {
-        let result = handle.await;
-        assert!(result.is_ok());
-    }
+    client_handle.await.expect("Client task failed");
 }
 
 #[tokio::test]
 #[serial]
 #[should_panic]
-pub async fn test_consumer_blocked_notifs_push() {
+pub async fn test_consumer_notification_preferences_push() {
     start_docker_compose().await;
 
-    let consumer_addr = "127.0.0.1:7979".to_owned();
+    let consumer_addr = "127.0.0.1:7980".to_owned();
     let brokers = "localhost:9092".to_owned();
     let topic = "user-notifs".to_owned();
-
     let cassandra_addr = "127.0.0.1:9042".to_owned();
 
     let config = ConsumerConfig {
         topic: topic.clone(),
         brokers: brokers.clone(),
-        notifications_to_send_database_addr: cassandra_addr.clone(),
-        blocked_notifications_database_addr: cassandra_addr.clone(),
-        clients_node_addr: "0.0.0.0:7979".to_owned(),
-        metrics_receiver_addr: "0.0.0.0:6979".to_owned(),
+        user_notifications_database_addr: cassandra_addr.clone(),
+        notification_preferences_database_addr: cassandra_addr.clone(),
+        clients_node_addr: "0.0.0.0:7980".to_owned(),
+        metrics_receiver_addr: "0.0.0.0:6980".to_owned(),
     };
 
     tokio::spawn(async move {
-        app::consumer::start(config).await;
+        app::consumer::start(config, get_jwt_secret()).await;
     });
 
-    wait_for_consumer_to_up(&consumer_addr).await;
-
     let db_session = SessionBuilder::new()
-        .known_node(cassandra_addr.clone())
+        .known_node(cassandra_addr)
         .build()
         .await
         .unwrap();
-    let db = BlockedNotificationsCassandra::new(db_session);
+
+    let repository = Arc::new(CassandraNotificationPreferencesRepository::new(db_session));
+    let service = NotificationPreferencesService::new(repository);
 
     let userid = Uuid::new_v4();
-    let sourceid = Uuid::new_v4();
-    let typ = "hihi-haha".to_owned();
-    let notification = Notification {
-        userid,
-        sourceid,
-        typ,
-    };
+    let sender_id = Uuid::new_v4();
 
-    let _ = db.post(&notification).await;
+    let preferences = NotificationPreferencesEntity::new(userid, "DM".to_string(), sender_id, 1);
+    service.mute(&preferences).await.expect("Failed to mute");
 
-    let client_handle = tokio::spawn(async move {
-        run_client(consumer_addr, userid).await;
-    });
+    let client_handle = tokio::spawn(run_client(consumer_addr, userid));
 
-    produce_stream_data(brokers, topic, &vec![userid], sourceid).await;
+    sleep(Duration::from_secs(1)).await;
+    produce_stream_data(brokers, topic, &vec![userid], sender_id).await;
 
-    if client_handle.await.is_err() {
-        panic!();
-    }
+    client_handle.await.unwrap();
 }

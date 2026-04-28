@@ -1,10 +1,10 @@
 use async_trait::async_trait;
 
-use crate::models::notification::Notification;
+use crate::entity::UserNotificationEntity;
 
 #[async_trait]
 pub trait NotificationStreamConsumer: Sync + Send {
     type ConsumerError: std::error::Error + Send + Sync + 'static;
 
-    async fn recv(&self) -> Result<Notification, Self::ConsumerError>;
+    async fn recv(&self) -> Result<UserNotificationEntity, Self::ConsumerError>;
 }

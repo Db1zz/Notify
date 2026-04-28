@@ -1,8 +1,13 @@
-use std::net::SocketAddr;
 use std::process::Stdio;
-use std::time::Duration;
+use std::sync::Once;
+use std::{net::SocketAddr, time::SystemTime};
+use tracing_subscriber::fmt;
+
+use std::time::{Duration, UNIX_EPOCH};
 
 use futures::SinkExt;
+use jsonwebtoken::{encode, EncodingKey, Header};
+use notify::security::jwt::Claims;
 use scylla::client::session_builder::SessionBuilder;
 use tokio::{
     net::TcpStream,
@@ -14,6 +19,17 @@ use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, Web
 use uuid::Uuid;
 
 static DOCKER_COMPOSE: OnceCell<()> = OnceCell::const_new();
+static TRACING: Once = Once::new();
+
+fn init_tracing() {
+    TRACING.call_once(|| {
+        fmt()
+            .with_target(true) // - shows which module/service the log came from
+            .with_thread_ids(true)
+            .with_level(true)
+            .init();
+    });
+}
 
 pub async fn start_docker_compose() {
     DOCKER_COMPOSE
@@ -30,6 +46,7 @@ pub async fn start_docker_compose() {
             wait_for_cassandra("127.0.0.1:9042").await;
         })
         .await;
+    init_tracing();
 }
 
 async fn wait_for_kafka(addr: SocketAddr, timeout_dur: Duration) {
@@ -87,4 +104,23 @@ pub async fn register_client(
         Ok(_) => ws_stream,
         Err(e) => panic!("Failed to register a user {:?}", e),
     }
+}
+
+pub fn generate_token_for_test(user_id: Uuid, secret: &str) -> String {
+    let expiration = (SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + 3600) as usize;
+
+    let claims = Claims::new("zxc@zxc.zxc".to_owned(), user_id, expiration);
+
+    let header = Header::default();
+    let key = EncodingKey::from_secret(secret.as_ref());
+
+    encode(&header, &claims, &key).expect("Failed to generate test JWT")
+}
+
+pub fn get_jwt_secret() -> String {
+    "zxczxczxczxczxczxczxczxzxczxczxc".to_owned()
 }

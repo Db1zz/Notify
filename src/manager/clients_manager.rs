@@ -5,31 +5,31 @@ use futures::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
 };
-use serde::Deserialize;
+
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::Mutex,
 };
 use tokio_tungstenite::{
     accept_async,
-    tungstenite::{Bytes, Error, Message, Utf8Bytes},
+    tungstenite::{
+        protocol::{frame::coding::CloseCode, CloseFrame},
+        Bytes, Error, Message, Utf8Bytes,
+    },
     WebSocketStream,
 };
 use tracing::{error, info, instrument, warn};
 use uuid::Uuid;
+
+use crate::security::jwt::validate_token;
 
 type WsSink = SplitSink<WebSocketStream<TcpStream>, Message>;
 type SharedSink = Arc<Mutex<WsSink>>;
 type ClientsMap = DashMap<Uuid, SharedSink>;
 type SharedClientsMap = Arc<ClientsMap>;
 
-#[derive(Deserialize)]
-struct ConnectionData {
-    userid: Uuid,
-}
-
 struct ConnectedClient {
-    userid: Uuid,
+    user_id: Uuid,
     read: SplitStream<WebSocketStream<TcpStream>>,
 }
 
@@ -37,21 +37,34 @@ pub struct ClientsManager {
     listener: Arc<TcpListener>,
     connected_clients: SharedClientsMap,
     addr: String,
+    jwt_secret: String,
 }
 
 impl ClientsManager {
-    pub async fn new(addr: String) -> Self {
+    pub async fn new(addr: String, jwt_secret: String) -> Self {
         Self {
             listener: Arc::new(TcpListener::bind(addr.clone()).await.unwrap()),
             connected_clients: Arc::new(DashMap::new()),
             addr,
+            jwt_secret,
         }
+    }
+
+    async fn close_connection(write: &mut WsSink, code: CloseCode, reason: impl Into<String>) {
+        let frame = CloseFrame {
+            code,
+            reason: reason.into().into(),
+        };
+
+        let _ = write.send(Message::Close(Some(frame))).await;
+        let _ = write.close().await;
     }
 
     async fn connect_client_task(
         connected_clients: SharedClientsMap,
-        write: SplitSink<WebSocketStream<TcpStream>, Message>,
+        mut write: SplitSink<WebSocketStream<TcpStream>, Message>,
         mut read: SplitStream<WebSocketStream<TcpStream>>,
+        jwt_secret: String,
     ) -> Result<ConnectedClient, ConnectionError> {
         let msg = match read.next().await {
             Some(Ok(m)) => m,
@@ -63,21 +76,34 @@ impl ClientsManager {
             }
         };
 
-        let buf: String = if msg.is_text() {
+        let token: String = if msg.is_text() {
             msg.to_string()
         } else {
             return Err(ConnectionError::UnknownMessage);
         };
 
-        let connection_data = serde_json::from_slice::<ConnectionData>(buf.as_bytes())?;
-        if connected_clients.contains_key(&connection_data.userid) {
-            return Err(ConnectionError::AlreadyConnected(connection_data.userid));
+        let claims = match validate_token(&token, &jwt_secret) {
+            Ok(c) => c,
+            Err(_) => {
+                Self::close_connection(
+                    &mut write,
+                    CloseCode::Invalid,
+                    "Invalid authentication token",
+                )
+                .await;
+                return Err(ConnectionError::InvalidAuthenticationToken);
+            }
+        };
+
+        if connected_clients.contains_key(&claims.user_id) {
+            Self::close_connection(&mut write, CloseCode::Policy, "Already Connected").await;
+            return Err(ConnectionError::AlreadyConnected(claims.user_id));
         }
 
-        connected_clients.insert(connection_data.userid, Arc::new(Mutex::new(write)));
+        connected_clients.insert(claims.user_id, Arc::new(Mutex::new(write)));
 
         Ok(ConnectedClient {
-            userid: connection_data.userid,
+            user_id: claims.user_id,
             read,
         })
     }
@@ -94,7 +120,7 @@ impl ClientsManager {
             let msg = match client.read.next().await {
                 Some(Ok(m)) => m,
                 Some(Err(e)) => {
-                    error!(error = ?e, "This is weird bugggg, should happen anyways...");
+                    error!(error = ?e, "This is weird bugggg, should not to happen anyways...");
                     break;
                 }
                 None => {
@@ -107,9 +133,9 @@ impl ClientsManager {
             }
         }
 
-        if connected_clients.remove(&client.userid).is_none() {
+        if connected_clients.remove(&client.user_id).is_none() {
             error!(
-				userid = client.userid.to_string(),
+				user_id = client.user_id.to_string(),
 				"Client doesn't exists in a dashmap, if you see this message, it means there's a BUG...")
         }
     }
@@ -119,19 +145,22 @@ impl ClientsManager {
         loop {
             let (tcp_socket, client_addr) = self.listener.accept().await.unwrap();
             let ws_stream = accept_async(tcp_socket).await.expect("Handshake failed");
-            let cloned_connected_clients = self.connected_clients.clone();
+            let connected_clients = self.connected_clients.clone();
+            let jwt_secret = self.jwt_secret.clone();
 
             tokio::spawn(async move {
                 let (write, read) = ws_stream.split();
                 let result =
-                    Self::connect_client_task(cloned_connected_clients.clone(), write, read).await;
+                    Self::connect_client_task(connected_clients.clone(), write, read, jwt_secret)
+                        .await;
                 match result {
                     Ok(client) => {
                         info!(
                             cl_addr = client_addr.to_string(),
+                            user_id = client.user_id.to_string(),
                             "A new client connected to the server"
                         );
-                        Self::watch_client_disconnect(cloned_connected_clients, client).await;
+                        Self::watch_client_disconnect(connected_clients, client).await;
                     }
                     Err(e) => {
                         warn!(error = ?e, "Failed to establish connection with a client");
@@ -192,14 +221,17 @@ pub enum ConnectionError {
     #[error(transparent)]
     Serialize(#[from] serde_json::Error),
 
+    #[error(transparent)]
+    ReadError(#[from] ReadError),
+
     #[error("User with id {0} is already connected")]
     AlreadyConnected(Uuid),
 
     #[error("Received unknown message through a websocket")]
     UnknownMessage,
 
-    #[error(transparent)]
-    ReadError(#[from] ReadError),
+    #[error("User has invalid authentication token")]
+    InvalidAuthenticationToken,
 }
 
 #[derive(thiserror::Error, Debug)]

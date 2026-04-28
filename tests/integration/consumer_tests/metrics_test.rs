@@ -4,7 +4,7 @@ use notify::{app, config::ConsumerConfig, metrics::metrics_receiver::MetricsRece
 use serial_test::serial;
 use tokio::time;
 
-use crate::utils::start_docker_compose;
+use crate::utils::{get_jwt_secret, start_docker_compose};
 
 #[tokio::test]
 #[serial]
@@ -22,14 +22,14 @@ async fn test_metrics_sender_reconnection() {
     let config = ConsumerConfig {
         topic: "user-notifs".to_owned(),
         brokers: "localhost:9092".to_owned(),
-        notifications_to_send_database_addr: "127.0.0.1:9042".to_owned(),
-        blocked_notifications_database_addr: "127.0.0.1:9042".to_owned(),
+        user_notifications_database_addr: "127.0.0.1:9042".to_owned(),
+        notification_preferences_database_addr: "127.0.0.1:9042".to_owned(),
         clients_node_addr: "127.0.0.1:6969".to_owned(),
         metrics_receiver_addr: receiver_addr.clone(),
     };
 
     tokio::spawn(async move {
-        app::consumer::start(config).await;
+        app::consumer::start(config, get_jwt_secret()).await;
     });
 
     time::sleep(Duration::from_secs(5)).await;

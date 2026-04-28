@@ -22,8 +22,8 @@ Notify is configured via a single YAML file. Below is an example configuration o
 consumer:
   topic: "user-notifs"
   brokers: "localhost:9092"
-  notifications_to_send_database_addr: "127.0.0.1:9042"
-  blocked_notifications_database_addr: "127.0.0.1:9042"
+  user_notifications_database_addr: "127.0.0.1:9042"
+  notification_preferences_database_addr: "127.0.0.1:9042"
   clients_node_addr: "127.0.0.1:6969"
   metrics_receiver_addr: "127.0.0.1:6979"
 
@@ -49,7 +49,7 @@ docker exec -it <cassandra_container_name> cqlsh -f /path/to/schema.cql
 ## Configuration notes
 
 - **brokers** should point to your Kafka broker.
-- **notifications_to_send_database_addr** and **blocked_notifications_database_addr** should point to Cassandra.
+- **user_notifications_database_addr** and **notification_preferences_database_addr** should point to Cassandra.
 - **clients_node_addr** is used by the consumer-side node communication.
 - **metrics_receiver_addr** and **load_balancer_metrics_addr** are the metrics endpoints.
 - **producer_addr** is the address the producer service binds to.

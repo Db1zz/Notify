@@ -4,7 +4,7 @@ use std::time::Duration;
 use notify::{app::consumer, config::ConsumerConfig};
 use tokio::task::JoinHandle;
 
-use crate::utils::start_docker_compose;
+use crate::utils::{get_jwt_secret, start_docker_compose};
 
 async fn catch_panic_or_timeout(timeout: Duration, handle: JoinHandle<()>) {
     match tokio::time::timeout(timeout, handle).await {
@@ -30,49 +30,49 @@ async fn test_broker_addr() {
     let config = ConsumerConfig {
         topic: "user-notifs".to_owned(),
         brokers: "zxc:zxc".to_owned(),
-        notifications_to_send_database_addr: "127.0.0.1:9042".to_owned(),
-        blocked_notifications_database_addr: "127.0.0.1:9042".to_owned(),
+        user_notifications_database_addr: "127.0.0.1:9042".to_owned(),
+        notification_preferences_database_addr: "127.0.0.1:9042".to_owned(),
         clients_node_addr: "127.0.0.1:6969".to_owned(),
         metrics_receiver_addr: "0.0.0.0:6979".to_owned(),
     };
 
-    let handle = tokio::spawn(consumer::start(config));
+    let handle = tokio::spawn(consumer::start(config, get_jwt_secret()));
     catch_panic_or_timeout(Duration::from_secs(5), handle).await;
 }
 
 #[tokio::test]
 #[serial]
 #[should_panic]
-pub async fn test_invalid_notifications_to_send_database_addr() {
+pub async fn test_invalid_user_notifications_database_addr() {
     start_docker_compose().await;
     let config = ConsumerConfig {
         topic: "user-notifs".to_owned(),
         brokers: "localhost:9092".to_owned(),
-        notifications_to_send_database_addr: "zxc:zxc".to_owned(),
-        blocked_notifications_database_addr: "127.0.0.1:9042".to_owned(),
+        user_notifications_database_addr: "zxc:zxc".to_owned(),
+        notification_preferences_database_addr: "127.0.0.1:9042".to_owned(),
         clients_node_addr: "127.0.0.1:6969".to_owned(),
         metrics_receiver_addr: "0.0.0.0:6979".to_owned(),
     };
 
-    let handle = tokio::spawn(consumer::start(config));
+    let handle = tokio::spawn(consumer::start(config, get_jwt_secret()));
     catch_panic_or_timeout(Duration::from_secs(5), handle).await;
 }
 
 #[tokio::test]
 #[serial]
 #[should_panic]
-pub async fn test_invalid_blocked_notifications_database_addr() {
+pub async fn test_invalid_notification_preferences_database_addr() {
     start_docker_compose().await;
     let config = ConsumerConfig {
         topic: "user-notifs".to_owned(),
         brokers: "localhost:9092".to_owned(),
-        notifications_to_send_database_addr: "127.0.0.1:9042".to_owned(),
-        blocked_notifications_database_addr: "zxc:zxc".to_owned(),
+        user_notifications_database_addr: "127.0.0.1:9042".to_owned(),
+        notification_preferences_database_addr: "zxc:zxc".to_owned(),
         clients_node_addr: "127.0.0.1:6969".to_owned(),
         metrics_receiver_addr: "0.0.0.0:6979".to_owned(),
     };
 
-    let handle = tokio::spawn(consumer::start(config));
+    let handle = tokio::spawn(consumer::start(config, get_jwt_secret()));
     catch_panic_or_timeout(Duration::from_secs(5), handle).await;
 }
 
@@ -84,13 +84,13 @@ pub async fn test_invalid_client_node_addr() {
     let config = ConsumerConfig {
         topic: "user-notifs".to_owned(),
         brokers: "localhost:9092".to_owned(),
-        notifications_to_send_database_addr: "127.0.0.1:9042".to_owned(),
-        blocked_notifications_database_addr: "127.0.0.1:9042".to_owned(),
+        user_notifications_database_addr: "127.0.0.1:9042".to_owned(),
+        notification_preferences_database_addr: "127.0.0.1:9042".to_owned(),
         clients_node_addr: "zxc:zxc".to_owned(),
         metrics_receiver_addr: "0.0.0.0:6979".to_owned(),
     };
 
-    let handle = tokio::spawn(consumer::start(config));
+    let handle = tokio::spawn(consumer::start(config, get_jwt_secret()));
     catch_panic_or_timeout(Duration::from_secs(5), handle).await;
 }
 
@@ -101,13 +101,13 @@ pub async fn test_invalid_metrics_receiver_addr() {
     let config = ConsumerConfig {
         topic: "user-notifs".to_owned(),
         brokers: "localhost:9092".to_owned(),
-        notifications_to_send_database_addr: "127.0.0.1:9042".to_owned(),
-        blocked_notifications_database_addr: "127.0.0.1:9042".to_owned(),
+        user_notifications_database_addr: "127.0.0.1:9042".to_owned(),
+        notification_preferences_database_addr: "127.0.0.1:9042".to_owned(),
         clients_node_addr: "127.0.0.1:6969".to_owned(),
         metrics_receiver_addr: "zxc:zxc".to_owned(),
     };
 
-    let handle = tokio::spawn(consumer::start(config));
+    let handle = tokio::spawn(consumer::start(config, get_jwt_secret()));
 
     tokio::time::sleep(Duration::from_secs(3)).await;
     assert!(!handle.is_finished(), "consumer exited too early");
@@ -122,13 +122,13 @@ pub async fn test_valid_addresses() {
     let config = ConsumerConfig {
         topic: "user-notifs".to_owned(),
         brokers: "localhost:9092".to_owned(),
-        notifications_to_send_database_addr: "127.0.0.1:9042".to_owned(),
-        blocked_notifications_database_addr: "127.0.0.1:9042".to_owned(),
+        user_notifications_database_addr: "127.0.0.1:9042".to_owned(),
+        notification_preferences_database_addr: "127.0.0.1:9042".to_owned(),
         clients_node_addr: "127.0.0.1:6969".to_owned(),
         metrics_receiver_addr: "0.0.0.0:6979".to_owned(),
     };
 
-    let handle = tokio::spawn(consumer::start(config));
+    let handle = tokio::spawn(consumer::start(config, get_jwt_secret()));
 
     tokio::time::sleep(Duration::from_secs(3)).await;
     assert!(!handle.is_finished(), "consumer exited too early");

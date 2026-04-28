@@ -1,140 +1,45 @@
-use async_trait::async_trait;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::time::sleep;
-use tracing::{debug, error, info, instrument, warn, Instrument};
+use tracing::{info, instrument, warn, Instrument};
 
 use crate::consumer::notification_stream_consumer::NotificationStreamConsumer;
-use crate::manager::task_manager::{TaskManager, TaskManagerTask};
+use crate::manager::task_manager::TaskManager;
 use crate::manager::ClientsManager;
 use crate::metrics::metrics_sender::MetricsSender;
 use crate::metrics::{LoadMetrics, Message, Metrics, NodeRole, Register};
-use crate::models::notification::Notification;
-use crate::repository::types::{Repository, RepositoryError};
+use crate::repository::CassandraUserNotificationsRepository;
+use crate::service::task::NotificationServiceTask;
+use crate::service::NotificationPreferencesService;
 
-pub struct NotificationServiceTask<NotifsToSendRepo, BlockedNotifsRepo> {
-    notification: Notification,
-    repo_notifs_to_send: Arc<NotifsToSendRepo>,
-    repo_blocked_notifs: Arc<BlockedNotifsRepo>,
-    clients_manager: Arc<ClientsManager>,
-    metrics: Arc<LoadMetrics>,
-}
-
-impl<NotifsToSendRepo, BlockedNotifsRepo>
-    NotificationServiceTask<NotifsToSendRepo, BlockedNotifsRepo>
+pub struct NotificationService<Consumer>
 where
-    NotifsToSendRepo: Repository<Item = Notification> + 'static,
-    BlockedNotifsRepo: Repository<Item = Notification> + 'static,
-{
-    pub fn new(
-        notification: Notification,
-        repo_notifs_to_send: Arc<NotifsToSendRepo>,
-        repo_blocked_notifs: Arc<BlockedNotifsRepo>,
-        clients_manager: Arc<ClientsManager>,
-        metrics: Arc<LoadMetrics>,
-    ) -> Self {
-        Self {
-            notification,
-            repo_notifs_to_send,
-            repo_blocked_notifs,
-            clients_manager,
-            metrics,
-        }
-    }
-
-    #[instrument(
-		skip(self, notification),
-		fields(userid = %notification.userid)
-	)]
-    async fn send_notification(&self, notification: &Notification) -> bool {
-        match self
-            .clients_manager
-            .send_to_client(notification.userid, notification.sourceid.to_string())
-            .await
-        {
-            Ok(_) => {
-                debug!(source_id = %notification.sourceid, "Notification sent successfully");
-                return true;
-            }
-            Err(e) => {
-                error!("Failed to write to client: {:?}", e);
-                return false;
-            }
-        }
-    }
-}
-
-#[async_trait]
-impl<NotifsToSendRepo, BlockedNotifsRepo> TaskManagerTask
-    for NotificationServiceTask<NotifsToSendRepo, BlockedNotifsRepo>
-where
-    NotifsToSendRepo: Repository<Item = Notification> + 'static,
-    BlockedNotifsRepo: Repository<Item = Notification> + 'static,
-{
-    #[instrument(
-		skip(self),
-		fields(notif_id = %self.notification.sourceid)
-	)]
-    async fn handle(&self) {
-        let started_at = Instant::now();
-        let is_notif_blocked: bool = match self.repo_blocked_notifs.get(&self.notification).await {
-            Ok(_) => true,
-            Err(RepositoryError::NotFound(_)) => false,
-            Err(e) => {
-                error!(error = ?e, "Database error checking blocked status");
-                return;
-            }
-        };
-
-        if is_notif_blocked {
-            info!("Notification is blocked by user; skipping");
-            return;
-        }
-
-        let is_sent = self.send_notification(&self.notification).await;
-        if !is_sent {
-            info!("Failed to send notification to a client, pushing to the database");
-            let _ = self.repo_notifs_to_send.post(&self.notification).await;
-        }
-
-        self.metrics.record_latency(started_at.elapsed());
-        self.metrics.dec_queue();
-    }
-}
-
-pub struct NotificationService<NotifsToSendRepo, BlockedNotifsRepo, Consumer>
-where
-    NotifsToSendRepo: Repository<Item = Notification> + 'static,
-    BlockedNotifsRepo: Repository<Item = Notification> + 'static,
     Consumer: NotificationStreamConsumer,
 {
-    repo_notifs_to_send: Arc<NotifsToSendRepo>,
-    repo_blocked_notifs: Arc<BlockedNotifsRepo>,
+    user_notifications: Arc<CassandraUserNotificationsRepository>,
+    notification_preferences: Arc<NotificationPreferencesService>,
     consumer: Arc<Consumer>,
     clients_manager: Arc<ClientsManager>,
-    task_manager: TaskManager<NotificationServiceTask<NotifsToSendRepo, BlockedNotifsRepo>>,
+    task_manager: TaskManager<NotificationServiceTask>,
     metrics: Arc<LoadMetrics>,
     receiver_addr: String,
 }
 
-impl<NotifsToSendRepo, BlockedNotifsRepo, Consumer>
-    NotificationService<NotifsToSendRepo, BlockedNotifsRepo, Consumer>
+impl<Consumer> NotificationService<Consumer>
 where
-    NotifsToSendRepo: Repository<Item = Notification> + 'static,
-    BlockedNotifsRepo: Repository<Item = Notification> + 'static,
     Consumer: NotificationStreamConsumer,
 {
     pub fn new(
-        repo_notifs_to_send: Arc<NotifsToSendRepo>,
-        repo_blocked_notifs: Arc<BlockedNotifsRepo>,
+        user_notifications: Arc<CassandraUserNotificationsRepository>,
+        notification_preferences: Arc<NotificationPreferencesService>,
         consumer: Arc<Consumer>,
         clients_manager: Arc<ClientsManager>,
-        task_manager: TaskManager<NotificationServiceTask<NotifsToSendRepo, BlockedNotifsRepo>>,
+        task_manager: TaskManager<NotificationServiceTask>,
         receiver_addr: String,
     ) -> Self {
         Self {
-            repo_notifs_to_send,
-            repo_blocked_notifs,
+            user_notifications,
+            notification_preferences,
             consumer,
             clients_manager,
             task_manager,
@@ -230,8 +135,8 @@ where
 
             let task = NotificationServiceTask::new(
                 notification,
-                self.repo_notifs_to_send.clone(),
-                self.repo_blocked_notifs.clone(),
+                self.user_notifications.clone(),
+                self.notification_preferences.clone(),
                 self.clients_manager.clone(),
                 self.metrics.clone(),
             );

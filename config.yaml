@@ -1,9 +1,9 @@
 consumer:
   topic: "user-notifs"
   brokers: "localhost:9092"
-  notifications_to_send_database_addr: "127.0.0.1:9042"
-  blocked_notifications_database_addr: "127.0.0.1:9042"
-  clients_node_addr: "127.0.0.1:6969"
+  user_notifications_database_addr: "127.0.0.1:9042"
+  notification_preferences_database_addr: "127.0.0.1:9042"
+  clients_node_addr: "0.0.0.0:6969"
   metrics_receiver_addr: "0.0.0.0:6979"
 
 load_balancer:

@@ -150,7 +150,7 @@ impl MetricsReceiver {
             };
 
             let connection_span =
-                tracing::info_span!("connection_worker", service = "mterics_receiver");
+                tracing::info_span!("connection_worker", service = "metrics_receiver");
             tokio::spawn(
                 Self::handle_connection(socket, tx.clone(), client_addr)
                     .instrument(connection_span),
