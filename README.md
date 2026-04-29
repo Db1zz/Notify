@@ -101,9 +101,6 @@ cargo run -- load-balancer
 
 **8992** — producer
 
-## TODO List
-- Authentication
-
 ## License
 
 Notify is licensed under the GNU GPL v3.0, see LICENSE
