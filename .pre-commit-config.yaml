@@ -14,6 +14,7 @@ repos:
         pass_filenames: false
 
       - id: rust-test
+        stages: [push]
         name: cargo test
         entry: cargo test
         language: system
