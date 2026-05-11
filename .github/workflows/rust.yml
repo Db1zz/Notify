@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
-        run: sudo apt-get update && install -y libcurl4-openssl-dev libsasl2-dev libzstd-dev --fix-missing
+        run: sudo apt-get update && sudo install -y libcurl4-openssl-dev libsasl2-dev libzstd-dev --fix-missing
       - run: rustup component add clippy
       - run: cargo clippy -- -D warnings
 
@@ -34,7 +34,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
-        run: sudo apt-get update && apt-get install -y libcurl4-openssl-dev libsasl2-dev libzstd-dev --fix-missing
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev libsasl2-dev libzstd-dev --fix-missing
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Install Docker Compose
